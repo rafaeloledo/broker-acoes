@@ -1,10 +1,10 @@
-# ⚡ Broker-Ações | Self-Hosted Brazilian Stocks GPU Terminal & Platform
+# Broker-Ações | Self-Hosted Brazilian Stocks GPU Terminal & Platform
 
 A high-performance, self-hosted Brazilian stock market (`B3`) desktop terminal and fundamental analysis platform built in Rust. It combines the deep fundamental analysis of **Status Invest** with a **hardware-accelerated GPU graphics pipeline (`wgpu` + Vulkan)** and an **in-memory data processing engine**.
 
 ---
 
-## 🏛️ Architecture Overview
+## Architecture Overview
 
 The system is organized as a modular Cargo workspace:
 
@@ -27,9 +27,9 @@ broker-acoes/
 
 ---
 
-## 🚀 Key Capabilities
+## Key Capabilities
 
-### 1. 📊 Status Invest Fundamental Dashboard
+### 1. Status Invest Fundamental Dashboard
 * **30+ Indicators**:
   * **Valuation**: `P/L`, `P/VP`, `EV/EBITDA`, `EV/EBIT`, `P/EBITDA`, `P/SR`, `P/Ativo`, `P/Cap.Giro`, `Dividend Yield (DY)`, `PEG Ratio`.
   * **Endividamento**: `Dívida Líquida / PL`, `Dívida Líquida / EBITDA`, `PL / Ativos`, `Passivos / Ativos`, `Liquidez Corrente`, `Liquidez Seca`.
@@ -43,26 +43,26 @@ broker-acoes/
 * **Specialized FII View**:
   * Real Estate Funds (`Tijolo`, `Papel`, `Shoppings`, `Agro`) tracking physical/financial vacancy, monthly dividend yield, net asset value (VPA), and multi-property breakdown.
 
-### 2. 📈 Hardware-Accelerated GPU Terminal
+### 2. Hardware-Accelerated GPU Terminal
 * **`wgpu` Direct Vulkan Pipeline**: Instanced OHLCV candlestick chart capable of rendering 100,000+ candles with sub-millisecond frame times.
 * **Level 2 Order Book (Livro de Ofertas)**: Real-time bid/ask depth visualization.
 * **Times & Trades (Fita de Negócios)**: Live tick stream with buyer/seller aggressor color-coding and broker IDs.
 * **Telemetry Overlay**: Real-time FPS (120Hz/240Hz), frame time in milliseconds, and GPU draw call counters.
 
-### 3. 🗺️ GPU Sector Heatmap (Treemap)
+### 3. GPU Sector Heatmap (Treemap)
 * Interactive B3 sector map (Financeiro, Petróleo & Gás, Mineração, Utilidades, Bens Industriais, FIIs).
 * Smooth color gradient representing gain/loss with real-time white/cyan flash pulses on incoming ticks.
 * One-click navigation to jump directly to any asset's fundamental sheet.
 
-### 4. 🔍 Multi-Factor SIMD Screener
+### 4. Multi-Factor SIMD Screener
 * Dynamic filters for Min DY, Max P/L, Max P/VP, Min ROE, Min Margem Líquida.
 * **Preset Strategies**:
-  * 🚀 *Fórmula Mágica de Greenblatt* (Rank EY + Rank ROIC)
-  * 💰 *Método Décio Bazin* (DY $\ge$ 6%, healthy payout & net debt)
-  * 🛡️ *Benjamin Graham Deep Value* (P/L $\le$ 15, P/VP $\le$ 1.5, Liquidez $\ge$ 1.5)
-  * 📈 *Status Invest Top Dividendos*
+  * *Fórmula Mágica de Greenblatt* (Rank EY + Rank ROIC)
+  * *Método Décio Bazin* (DY $\ge$ 6%, healthy payout & net debt)
+  * *Benjamin Graham Deep Value* (P/L $\le$ 15, P/VP $\le$ 1.5, Liquidez $\ge$ 1.5)
+  * *Status Invest Top Dividendos*
 
-### 5. 💼 Portfolio & Brazilian Tax Engine (DARF 6015 / IRPF)
+### 5. Portfolio & Brazilian Tax Engine (DARF 6015 / IRPF)
 * **SINACOR Brokerage Note Importer**: Automatic parsing of Brazilian broker notes (XP, Clear, BTG, Inter, Rico).
 * **Exact Preço Médio (PM)**: Proration of B3 fees (*Taxa de Liquidação*, *Emolumentos*, *Corretagem*, *ISS*).
 * **Receita Federal Compliance**:
@@ -73,7 +73,7 @@ broker-acoes/
 
 ---
 
-## 🛠️ Build & Run
+## Build & Run
 
 ### Prerequisites
 * Rust 1.80+ (tested on Arch Linux Rust 1.98.1)
