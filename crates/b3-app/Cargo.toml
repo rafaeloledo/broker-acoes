@@ -1,0 +1,29 @@
+[package]
+name = "b3-app"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+b3-core.workspace = true
+b3-ingest.workspace = true
+b3-storage.workspace = true
+b3-analytics.workspace = true
+b3-portfolio.workspace = true
+b3-gpu.workspace = true
+
+eframe.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+wgpu.workspace = true
+tokio.workspace = true
+crossbeam-channel.workspace = true
+arc-swap.workspace = true
+parking_lot.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+env_logger.workspace = true
+anyhow.workspace = true

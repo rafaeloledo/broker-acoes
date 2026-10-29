@@ -1,0 +1,52 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/b3-core",
+    "crates/b3-ingest",
+    "crates/b3-storage",
+    "crates/b3-analytics",
+    "crates/b3-portfolio",
+    "crates/b3-gpu",
+    "crates/b3-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["broker-acoes contributors"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+b3-core = { path = "crates/b3-core" }
+b3-ingest = { path = "crates/b3-ingest" }
+b3-storage = { path = "crates/b3-storage" }
+b3-analytics = { path = "crates/b3-analytics" }
+b3-portfolio = { path = "crates/b3-portfolio" }
+b3-gpu = { path = "crates/b3-gpu" }
+
+# Serialization & Core
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2.0"
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.11"
+
+# Async & Networking
+tokio = { version = "1.40", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "stream", "gzip"] }
+futures = "0.3"
+
+# Concurrency & Math
+crossbeam-channel = "0.5"
+arc-swap = "1.7"
+parking_lot = "0.12"
+bytemuck = { version = "1.21", features = ["derive"] }
+glam = "0.29"
+
+# Graphics & GUI
+wgpu = { version = "30.0", features = ["wgsl", "vulkan"] }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11"] }
+egui = "0.37"
+egui-wgpu = "0.37"
