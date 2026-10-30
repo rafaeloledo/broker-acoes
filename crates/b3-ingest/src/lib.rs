@@ -2,7 +2,9 @@ pub mod companies;
 pub mod cotahist;
 pub mod cvm;
 pub mod dfp;
+pub mod ipe;
 pub mod live;
+pub mod rss;
 pub mod sinacor;
 
 #[cfg(test)]

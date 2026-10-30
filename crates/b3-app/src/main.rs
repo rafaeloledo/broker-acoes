@@ -29,6 +29,7 @@ use presentation::{format_metric, MetricId};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActiveView {
     Decision,
+    News,
     StatusInvest,
     GpuTerminal,
     MarketHeatmap,
@@ -95,6 +96,17 @@ struct AppState {
     trades: Vec<TradeOperation>,
     monthly_reports: Vec<MonthlyTaxReport>,
     bazin_target_yield: f64,
+    news_text: String,
+    news_ticker: String,
+    news_period_days: Option<i64>,
+    news_rows: Vec<b3_core::news::NewsItem>,
+    news_attempted_at: Option<i64>,
+    news_generation: u64,
+    news_loaded_generation: u64,
+    news_loaded_key: String,
+    decision_news: Vec<b3_core::news::NewsItem>,
+    decision_news_ticker: String,
+    decision_news_generation: u64,
 }
 
 impl AppState {
@@ -239,6 +251,8 @@ impl AppState {
             asks,
         };
         let market_rx = market_feed::spawn(db.clone());
+        let news_ticker = selected_ticker.clone();
+        let news_attempted_at = db.latest_news_attempt().ok().flatten();
 
         Self {
             active_view: ActiveView::Decision,
@@ -282,6 +296,17 @@ impl AppState {
             trades,
             monthly_reports,
             bazin_target_yield: 6.0,
+            news_text: String::new(),
+            news_ticker,
+            news_period_days: Some(30),
+            news_rows: Vec::new(),
+            news_attempted_at,
+            news_generation: 0,
+            news_loaded_generation: u64::MAX,
+            news_loaded_key: String::new(),
+            decision_news: Vec::new(),
+            decision_news_ticker: String::new(),
+            decision_news_generation: u64::MAX,
         }
     }
 
@@ -444,6 +469,10 @@ impl AppState {
                         self.store_cvm(&row.ticker, row.year, row.accounts);
                     }
                 }
+                MarketEvent::News => {
+                    self.news_generation = self.news_generation.wrapping_add(1);
+                    self.news_attempted_at = self.db.latest_news_attempt().ok().flatten();
+                }
             }
         }
     }
@@ -531,6 +560,7 @@ impl eframe::App for AppState {
             }
 
             let tools = [
+                (ActiveView::News, "Notícias"),
                 (ActiveView::GpuTerminal, "Terminal"),
                 (ActiveView::MarketHeatmap, "Mapa"),
                 (ActiveView::Screener, "Busca de ativos"),
@@ -576,6 +606,7 @@ impl eframe::App for AppState {
 
                     if ui.button(RichText::new(&sym).strong().color(chip_color)).clicked() {
                         self.focused_ticker_idx = i;
+                        self.news_ticker = sym.clone();
                         self.selected_ticker = sym;
                     }
                     if ui.small_button("trocar").clicked() {
@@ -617,6 +648,7 @@ impl eframe::App for AppState {
         // Main View Content
         match self.active_view {
             ActiveView::Decision => self.render_decision_view(ui),
+            ActiveView::News => self.render_news_view(ui),
             ActiveView::StatusInvest => self.render_status_invest_view(ui),
             ActiveView::GpuTerminal => self.render_gpu_terminal_view(ui),
             ActiveView::MarketHeatmap => self.render_heatmap_view(ui),

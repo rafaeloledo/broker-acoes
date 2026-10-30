@@ -96,6 +96,8 @@ impl AppState {
                         });
                 }
             });
+
+            self.render_decision_news(ui, &sym);
         });
     }
 
