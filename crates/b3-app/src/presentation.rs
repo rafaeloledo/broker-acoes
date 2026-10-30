@@ -31,6 +31,14 @@ pub fn fundamentals_caption(cvm_year: Option<i32>) -> String {
     }
 }
 
+pub fn change_percent(price: f64, previous_close: f64) -> Option<f64> {
+    if previous_close <= 0.0 || !price.is_finite() {
+        None
+    } else {
+        Some((price - previous_close) / previous_close * 100.0)
+    }
+}
+
 pub fn format_metric(core: Option<&CoreMultiples>, metric: MetricId) -> String {
     let Some(core) = core else {
         return "indisponível".to_string();
@@ -53,5 +61,21 @@ pub fn format_metric(core: Option<&CoreMultiples>, metric: MetricId) -> String {
             format!("R$ {value:.2}")
         }
         (_, Some(value)) => format!("{value:.2}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::change_percent;
+
+    #[test]
+    fn change_uses_previous_close() {
+        let change = change_percent(110.0, 100.0).unwrap();
+        assert!((change - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn change_without_previous_close_is_absent() {
+        assert!(change_percent(110.0, 0.0).is_none());
     }
 }
