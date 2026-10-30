@@ -4,10 +4,14 @@ use std::time::Duration;
 
 use b3_ingest::companies::issuer_for_ticker;
 use b3_ingest::dfp::{self, KeptAccount};
+use b3_ingest::ipe;
 use b3_ingest::live::LiveFeedClient;
+use b3_ingest::rss;
 use b3_storage::Database;
 use chrono::{Datelike, Utc};
 use tokio::time::sleep;
+
+const NEWS_POLL_INTERVAL_MS: i64 = 30 * 60 * 1000;
 
 #[derive(Debug, Clone)]
 pub struct QuoteTick {
@@ -27,6 +31,7 @@ pub struct CvmLoaded {
 pub enum MarketEvent {
     Quotes(Vec<QuoteTick>),
     Cvm(Vec<CvmLoaded>),
+    News,
 }
 
 pub fn spawn(db: Arc<Database>) -> crossbeam_channel::Receiver<MarketEvent> {
@@ -54,11 +59,13 @@ async fn run(db: Arc<Database>, tx: crossbeam_channel::Sender<MarketEvent>) {
     let mut last_prune_day: Option<i64> = None;
     let mut known_tickers: Vec<String> = Vec::new();
     let mut cvm_attempted_for: Vec<String> = Vec::new();
+    let mut last_news_ms: Option<i64> = None;
 
     loop {
         let tickers = db.get_user_tickers().unwrap_or_default();
         if tickers != known_tickers {
             last_quote_ms = None;
+            last_news_ms = None;
             if tickers != cvm_attempted_for {
                 cvm_attempted_for.clear();
             }
@@ -117,6 +124,15 @@ async fn run(db: Arc<Database>, tx: crossbeam_channel::Sender<MarketEvent>) {
                 }
                 Err(err) => log::warn!("Falha na carga CVM: {err}"),
             }
+        }
+
+        let news_due = last_news_ms
+            .map(|previous| now.saturating_sub(previous) >= NEWS_POLL_INTERVAL_MS)
+            .unwrap_or(true);
+        if news_due && !tickers.is_empty() {
+            sync_news(&db, &cvm_client, &tickers).await;
+            last_news_ms = Some(Utc::now().timestamp_millis());
+            let _ = tx.send(MarketEvent::News);
         }
 
         sleep(Duration::from_secs(20)).await;
@@ -199,4 +215,27 @@ fn persist_rows(db: &Database, tickers: &[String], rows: &[KeptAccount]) -> anyh
         });
     }
     Ok(loaded)
+}
+
+async fn sync_news(db: &Database, client: &reqwest::Client, tickers: &[String]) {
+    let mut items = Vec::new();
+    let year = Utc::now().date_naive().year();
+    for candidate in [year, year - 1] {
+        match ipe::download_ipe_news(client, candidate, tickers).await {
+            Ok(mut rows) => items.append(&mut rows),
+            Err(err) => log::warn!("Falha nos fatos relevantes de {candidate}: {err}"),
+        }
+    }
+    for feed in rss::load_feed_urls(std::path::Path::new("news_feeds.txt")) {
+        match rss::download_rss_news(client, &feed, tickers).await {
+            Ok(mut rows) => items.append(&mut rows),
+            Err(err) => log::warn!("Falha no RSS: {err}"),
+        }
+    }
+    if let Err(err) = db.insert_news(&items) {
+        log::warn!("Falha ao gravar notícias: {err}");
+    }
+    if let Err(err) = db.mark_news_attempt(Utc::now().timestamp_millis()) {
+        log::warn!("Falha ao registrar a coleta de notícias: {err}");
+    }
 }

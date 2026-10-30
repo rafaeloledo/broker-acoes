@@ -1,3 +1,4 @@
+use b3_core::news::NewsItem;
 use b3_core::quote::Candle;
 use b3_core::tax::{OperationKind, OperationSide, TradeOperation};
 use chrono::NaiveDate;
@@ -87,6 +88,23 @@ impl Database {
                 amount REAL NOT NULL,
                 reference_date TEXT NOT NULL,
                 PRIMARY KEY (ticker, year, account_code)
+            );
+
+            CREATE TABLE IF NOT EXISTS news (
+                url TEXT PRIMARY KEY,
+                ticker TEXT NOT NULL,
+                title TEXT NOT NULL,
+                source TEXT NOT NULL,
+                published_at_ms INTEGER NOT NULL,
+                summary TEXT,
+                external_id TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_news_ticker_time ON news(ticker, published_at_ms);
+
+            CREATE TABLE IF NOT EXISTS news_sync (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                attempted_at_ms INTEGER NOT NULL
             );
             "#,
         )?;
@@ -463,6 +481,112 @@ impl Database {
         }
         Ok(())
     }
+
+    /// Insere notícias. A mesma URL permanece uma única linha. Item sem URL http não entra.
+    pub fn insert_news(&self, items: &[NewsItem]) -> anyhow::Result<usize> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let mut inserted = 0usize;
+        {
+            let mut stmt = tx.prepare_cached(
+                "INSERT OR IGNORE INTO news (url, ticker, title, source, published_at_ms, summary, external_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            )?;
+            for item in items {
+                let url = item.url.trim();
+                if !(url.starts_with("https://") || url.starts_with("http://")) {
+                    continue;
+                }
+                if item.title.trim().is_empty() || item.ticker.trim().is_empty() {
+                    continue;
+                }
+                let changed = stmt.execute(params![
+                    url,
+                    item.ticker.trim().to_uppercase(),
+                    item.title.trim(),
+                    item.source.trim(),
+                    item.published_at_ms,
+                    item.summary.as_deref(),
+                    item.external_id.as_deref(),
+                ])?;
+                inserted += changed;
+            }
+        }
+        tx.commit()?;
+        Ok(inserted)
+    }
+
+    pub fn search_news(
+        &self,
+        ticker: Option<&str>,
+        text: Option<&str>,
+        from_ms: Option<i64>,
+        to_ms: Option<i64>,
+        limit: usize,
+    ) -> anyhow::Result<Vec<NewsItem>> {
+        let conn = self.conn.lock();
+        let mut sql = String::from(
+            "SELECT ticker, title, url, source, published_at_ms, summary, external_id
+             FROM news WHERE 1 = 1",
+        );
+        let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        if let Some(ticker) = ticker.map(|ticker| ticker.trim().to_uppercase()).filter(|ticker| !ticker.is_empty()) {
+            sql.push_str(" AND ticker = ?");
+            values.push(Box::new(ticker));
+        }
+        if let Some(text) = text.map(str::trim).filter(|text| !text.is_empty()) {
+            sql.push_str(" AND LOWER(title) LIKE ?");
+            values.push(Box::new(format!("%{}%", text.to_lowercase())));
+        }
+        if let Some(from_ms) = from_ms {
+            sql.push_str(" AND published_at_ms >= ?");
+            values.push(Box::new(from_ms));
+        }
+        if let Some(to_ms) = to_ms {
+            sql.push_str(" AND published_at_ms <= ?");
+            values.push(Box::new(to_ms));
+        }
+        sql.push_str(" ORDER BY published_at_ms DESC, title ASC LIMIT ?");
+        values.push(Box::new(limit as i64));
+        let params = rusqlite::params_from_iter(values.iter());
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params, |row| {
+            Ok(NewsItem {
+                ticker: row.get(0)?,
+                title: row.get(1)?,
+                url: row.get(2)?,
+                source: row.get(3)?,
+                published_at_ms: row.get(4)?,
+                summary: row.get(5)?,
+                external_id: row.get(6)?,
+            })
+        })?;
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row?);
+        }
+        Ok(items)
+    }
+
+    pub fn mark_news_attempt(&self, attempted_at_ms: i64) -> anyhow::Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO news_sync (id, attempted_at_ms) VALUES (1, ?1)
+             ON CONFLICT(id) DO UPDATE SET attempted_at_ms = excluded.attempted_at_ms",
+            params![attempted_at_ms],
+        )?;
+        Ok(())
+    }
+
+    pub fn latest_news_attempt(&self) -> anyhow::Result<Option<i64>> {
+        let conn = self.conn.lock();
+        let value = conn.query_row("SELECT attempted_at_ms FROM news_sync WHERE id = 1", [], |row| row.get(0));
+        match value {
+            Ok(ms) => Ok(Some(ms)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -620,5 +744,49 @@ mod tests {
         assert!(accounts.iter().any(|(c, v)| c == "3.11" && (*v - 12.0).abs() < 1e-9));
         assert!(!accounts.iter().any(|(c, _)| c == "1"));
         assert_eq!(db.cvm_latest_year("PETR4").unwrap(), Some(2024));
+    }
+
+    #[test]
+    fn test_news_url_is_unique_and_query_is_per_ticker() {
+        let db = Database::in_memory().unwrap();
+        let petr = NewsItem {
+            ticker: "PETR4".into(),
+            title: "Petrobras paga dividendos".into(),
+            url: "https://exemplo.test/petr".into(),
+            source: "CVM".into(),
+            published_at_ms: 2_000,
+            summary: None,
+            external_id: Some("p1".into()),
+        };
+        let older = NewsItem {
+            ticker: "petr4".into(),
+            title: "Petrobras antigo".into(),
+            url: "https://exemplo.test/petr-antigo".into(),
+            source: "CVM".into(),
+            published_at_ms: 1_000,
+            summary: None,
+            external_id: None,
+        };
+        let vale = NewsItem {
+            ticker: "VALE3".into(),
+            title: "Vale produz".into(),
+            url: "https://exemplo.test/vale".into(),
+            source: "RSS".into(),
+            published_at_ms: 3_000,
+            summary: None,
+            external_id: None,
+        };
+        assert_eq!(db.insert_news(&[petr.clone(), vale.clone()]).unwrap(), 2);
+        assert_eq!(db.insert_news(&[petr, older.clone()]).unwrap(), 1);
+        let rows = db.search_news(Some("PETR4"), None, None, None, 10).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].title, "Petrobras paga dividendos");
+        assert_eq!(rows[1].title, "Petrobras antigo");
+        assert!(rows.iter().all(|row| row.ticker == "PETR4"));
+        let filtered = db.search_news(Some("PETR4"), Some("dividendos"), None, None, 10).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert!(db.latest_news_attempt().unwrap().is_none());
+        db.mark_news_attempt(50).unwrap();
+        assert_eq!(db.latest_news_attempt().unwrap(), Some(50));
     }
 }
