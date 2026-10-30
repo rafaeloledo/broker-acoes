@@ -46,6 +46,20 @@ pub mod cvm_codes {
     pub const IMPOSTO_DE_RENDA_CSLL: &str = "3.08";
     pub const LUCRO_LIQUIDO_CONTINUADO: &str = "3.09";
     pub const LUCRO_LIQUIDO_CONSOLIDADO: &str = "3.11"; // Lucro Líquido do Período
+    pub const DIVIDENDOS_PAGOS: &str = "6.03.05";
+    pub const DIVIDENDOS_PAGOS_ALT: &str = "6.03.04";
+    /// Quantidade de ações gravada pelo ingest a partir da composição de capital, não é código CVM.
+    pub const SHARES_TOTAL: &str = "SHARES";
+
+    /// Contas persistidas para o primeiro conjunto de indicadores.
+    pub const CORE_ACCOUNTS: &[&str] = &[
+        LUCRO_LIQUIDO_CONSOLIDADO,
+        LUCRO_LIQUIDO_CONTINUADO,
+        PATRIMONIO_LIQUIDO,
+        DIVIDENDOS_PAGOS,
+        DIVIDENDOS_PAGOS_ALT,
+        SHARES_TOTAL,
+    ];
 
     // Demonstração dos Fluxos de Caixa (DFC)
     pub const FLUXO_CAIXA_OPERACIONAL: &str = "6.01"; // FCO

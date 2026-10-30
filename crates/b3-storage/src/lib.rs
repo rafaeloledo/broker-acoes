@@ -10,6 +10,13 @@ pub struct Database {
     conn: Arc<Mutex<Connection>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DailyQuoteWrite {
+    Inserted,
+    Updated,
+    Unchanged,
+}
+
 impl Database {
     pub fn open<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
         let conn = Connection::open(path)?;
@@ -72,8 +79,36 @@ impl Database {
                 slot_index INTEGER PRIMARY KEY,
                 ticker TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS cvm_accounts (
+                ticker TEXT NOT NULL,
+                year INTEGER NOT NULL,
+                account_code TEXT NOT NULL,
+                amount REAL NOT NULL,
+                reference_date TEXT NOT NULL,
+                PRIMARY KEY (ticker, year, account_code)
+            );
             "#,
         )?;
+        Self::ensure_column(&conn, "quotes", "source", "ALTER TABLE quotes ADD COLUMN source TEXT")?;
+        Self::ensure_column(
+            &conn,
+            "quotes",
+            "fetched_at_ms",
+            "ALTER TABLE quotes ADD COLUMN fetched_at_ms INTEGER",
+        )?;
+        Ok(())
+    }
+
+    fn ensure_column(conn: &Connection, table: &str, column: &str, ddl: &str) -> anyhow::Result<()> {
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+        let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        for name in names {
+            if name? == column {
+                return Ok(());
+            }
+        }
+        conn.execute(ddl, [])?;
         Ok(())
     }
 
@@ -127,6 +162,187 @@ impl Database {
             candles.push(r?);
         }
         Ok(candles)
+    }
+
+    pub const MAX_DAILY_QUOTES: usize = 180;
+
+    /// Uma linha por ticker por dia de pregão. Sem escrita se close e volume não mudaram.
+    pub fn upsert_daily_quote(
+        &self,
+        symbol: &str,
+        candle: &Candle,
+        fetched_at_ms: i64,
+    ) -> anyhow::Result<DailyQuoteWrite> {
+        let symbol = symbol.trim().to_uppercase();
+        let day_ms = b3_core::quote::brt_day_start_ms(candle.timestamp_ms);
+        let conn = self.conn.lock();
+
+        let existing = conn
+            .query_row(
+                "SELECT open, high, low, close, volume FROM quotes WHERE symbol = ?1 AND timestamp_ms = ?2 AND source = 'market'",
+                params![symbol, day_ms],
+                |row| {
+                    Ok((
+                        row.get::<_, f64>(0)?,
+                        row.get::<_, f64>(1)?,
+                        row.get::<_, f64>(2)?,
+                        row.get::<_, f64>(3)?,
+                        row.get::<_, f64>(4)?,
+                    ))
+                },
+            )
+            .ok();
+
+        if let Some((open, high, low, close, volume)) = existing {
+            if (close - candle.close).abs() < 1e-6 && (volume - candle.volume).abs() < 1e-6 {
+                return Ok(DailyQuoteWrite::Unchanged);
+            }
+            let high = high.max(candle.high).max(candle.close);
+            let low = low.min(candle.low).min(candle.close);
+            conn.execute(
+                "UPDATE quotes SET high = ?1, low = ?2, close = ?3, volume = ?4, adjusted_close = ?5, fetched_at_ms = ?6
+                 WHERE symbol = ?7 AND timestamp_ms = ?8 AND source = 'market'",
+                params![
+                    high,
+                    low,
+                    candle.close,
+                    candle.volume,
+                    candle.close,
+                    fetched_at_ms,
+                    symbol,
+                    day_ms
+                ],
+            )?;
+            let _ = (open, low);
+            Ok(DailyQuoteWrite::Updated)
+        } else {
+            conn.execute(
+                "INSERT INTO quotes (symbol, timestamp_ms, open, high, low, close, volume, trades, adjusted_close, source, fetched_at_ms)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'market', ?10)",
+                params![
+                    symbol,
+                    day_ms,
+                    candle.close,
+                    candle.high.max(candle.close),
+                    candle.low.min(candle.close),
+                    candle.close,
+                    candle.volume,
+                    candle.trades,
+                    candle.close,
+                    fetched_at_ms,
+                ],
+            )?;
+            Ok(DailyQuoteWrite::Inserted)
+        }
+    }
+
+    pub fn latest_market_quote(&self, symbol: &str) -> anyhow::Result<Option<(Candle, i64)>> {
+        let symbol = symbol.trim().to_uppercase();
+        let conn = self.conn.lock();
+        let row = conn.query_row(
+            "SELECT timestamp_ms, open, high, low, close, volume, trades, adjusted_close, fetched_at_ms
+             FROM quotes WHERE symbol = ?1 AND source = 'market'
+             ORDER BY timestamp_ms DESC LIMIT 1",
+            params![symbol],
+            |row| {
+                Ok((
+                    Candle {
+                        timestamp_ms: row.get(0)?,
+                        open: row.get(1)?,
+                        high: row.get(2)?,
+                        low: row.get(3)?,
+                        close: row.get(4)?,
+                        volume: row.get(5)?,
+                        trades: row.get(6)?,
+                        adjusted_close: row.get(7)?,
+                    },
+                    row.get::<_, Option<i64>>(8)?.unwrap_or(0),
+                ))
+            },
+        );
+        match row {
+            Ok(value) => Ok(Some(value)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    /// Remove dias além do teto. O chamador deve invocar no máximo uma vez por dia.
+    pub fn prune_daily_quotes(&self, symbol: &str) -> anyhow::Result<()> {
+        let symbol = symbol.trim().to_uppercase();
+        let conn = self.conn.lock();
+        conn.execute(
+            "DELETE FROM quotes WHERE symbol = ?1 AND source = 'market' AND timestamp_ms NOT IN (
+                SELECT timestamp_ms FROM quotes WHERE symbol = ?1 AND source = 'market'
+                ORDER BY timestamp_ms DESC LIMIT ?2
+            )",
+            params![symbol, Self::MAX_DAILY_QUOTES as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn cvm_latest_year(&self, ticker: &str) -> anyhow::Result<Option<i32>> {
+        let ticker = ticker.trim().to_uppercase();
+        let conn = self.conn.lock();
+        let year = conn.query_row(
+            "SELECT MAX(year) FROM cvm_accounts WHERE ticker = ?1",
+            params![ticker],
+            |row| row.get::<_, Option<i32>>(0),
+        )?;
+        Ok(year)
+    }
+
+    pub fn replace_cvm_year(
+        &self,
+        ticker: &str,
+        year: i32,
+        reference_date: NaiveDate,
+        accounts: &[(String, f64)],
+    ) -> anyhow::Result<()> {
+        let ticker = ticker.trim().to_uppercase();
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM cvm_accounts WHERE ticker = ?1", params![ticker])?;
+        {
+            let mut stmt = tx.prepare_cached(
+                "INSERT INTO cvm_accounts (ticker, year, account_code, amount, reference_date)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )?;
+            let date = reference_date.format("%Y-%m-%d").to_string();
+            for (code, amount) in accounts {
+                stmt.execute(params![ticker, year, code, amount, date])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn load_cvm_accounts(&self, ticker: &str) -> anyhow::Result<Option<(i32, Vec<(String, f64)>)>> {
+        let ticker = ticker.trim().to_uppercase();
+        let conn = self.conn.lock();
+        let year: Option<i32> = conn.query_row(
+            "SELECT MAX(year) FROM cvm_accounts WHERE ticker = ?1",
+            params![ticker],
+            |row| row.get(0),
+        )?;
+        let Some(year) = year else {
+            return Ok(None);
+        };
+        let mut stmt = conn.prepare(
+            "SELECT account_code, amount FROM cvm_accounts WHERE ticker = ?1 AND year = ?2",
+        )?;
+        let rows = stmt.query_map(params![ticker, year], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+        })?;
+        let mut accounts = Vec::new();
+        for row in rows {
+            accounts.push(row?);
+        }
+        if accounts.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some((year, accounts)))
+        }
     }
 
     pub fn insert_trade(&self, trade: &TradeOperation) -> anyhow::Result<()> {
@@ -334,5 +550,75 @@ mod tests {
 
         // Cleanup
         let _ = std::fs::remove_file(db_path);
+    }
+
+    fn candle_at(timestamp_ms: i64, close: f64, volume: f64) -> Candle {
+        Candle {
+            timestamp_ms,
+            open: close,
+            high: close,
+            low: close,
+            close,
+            volume,
+            trades: 1,
+            adjusted_close: close,
+        }
+    }
+
+    #[test]
+    fn test_daily_quote_is_one_row_per_day_and_capped() {
+        let db = Database::in_memory().unwrap();
+        let morning = 1_717_416_000_000; // 2024-06-03 12:00 UTC = 09:00 BRT, mesmo dia que a tarde
+        let afternoon = morning + 3 * 3_600_000;
+        assert_eq!(
+            b3_core::quote::brt_day_start_ms(morning),
+            b3_core::quote::brt_day_start_ms(afternoon)
+        );
+
+        assert_eq!(
+            db.upsert_daily_quote("petr4", &candle_at(morning, 36.0, 10.0), morning).unwrap(),
+            DailyQuoteWrite::Inserted
+        );
+        assert_eq!(
+            db.upsert_daily_quote("PETR4", &candle_at(afternoon, 36.0, 10.0), afternoon).unwrap(),
+            DailyQuoteWrite::Unchanged
+        );
+        assert_eq!(
+            db.upsert_daily_quote("PETR4", &candle_at(afternoon, 36.5, 12.0), afternoon).unwrap(),
+            DailyQuoteWrite::Updated
+        );
+
+        let market = db.latest_market_quote("PETR4").unwrap().unwrap();
+        assert!((market.0.close - 36.5).abs() < 1e-9);
+        assert_eq!(market.1, afternoon);
+        let stored = db.get_quotes("PETR4", 10).unwrap();
+        assert_eq!(stored.len(), 1);
+
+        let day = 86_400_000;
+        for i in 0..181 {
+            let ts = morning + i * day;
+            db.upsert_daily_quote("PETR4", &candle_at(ts, 10.0 + i as f64, 1.0), ts).unwrap();
+        }
+        db.prune_daily_quotes("PETR4").unwrap();
+        let capped = db.get_quotes("PETR4", 500).unwrap();
+        let market_rows = capped.iter().filter(|c| c.trades == 1).count();
+        assert!(market_rows <= Database::MAX_DAILY_QUOTES);
+        assert_eq!(market_rows, Database::MAX_DAILY_QUOTES);
+    }
+
+    #[test]
+    fn test_cvm_accounts_replace_without_duplicates() {
+        let db = Database::in_memory().unwrap();
+        let date = NaiveDate::from_ymd_opt(2024, 12, 31).unwrap();
+        db.replace_cvm_year("PETR4", 2024, date, &[("3.11".into(), 10.0), ("1".into(), 99.0)])
+            .unwrap();
+        db.replace_cvm_year("PETR4", 2024, date, &[("3.11".into(), 12.0), ("2.03".into(), 20.0)])
+            .unwrap();
+        let (year, accounts) = db.load_cvm_accounts("PETR4").unwrap().unwrap();
+        assert_eq!(year, 2024);
+        assert_eq!(accounts.len(), 2);
+        assert!(accounts.iter().any(|(c, v)| c == "3.11" && (*v - 12.0).abs() < 1e-9));
+        assert!(!accounts.iter().any(|(c, _)| c == "1"));
+        assert_eq!(db.cvm_latest_year("PETR4").unwrap(), Some(2024));
     }
 }

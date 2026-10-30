@@ -1,7 +1,9 @@
+pub mod core_multiples;
 pub mod screener;
 pub mod ttm;
 pub mod valuation;
 
+pub use core_multiples::*;
 pub use screener::*;
 pub use ttm::*;
 pub use valuation::*;
@@ -13,11 +15,14 @@ mod tests {
 
     #[test]
     fn test_graham_and_bazin_formulas() {
-        let petr4 = StockIndicators::default_for("PETR4");
-        // Graham fair value: sqrt(22.5 * LPA * VPA)
-        assert!(petr4.graham_fair_value > 50.0);
-        // Bazin ceiling price: DPA / 0.06
-        assert!(petr4.bazin_ceiling_price > 80.0);
+        // LPA 5, VPA 30, DPA 5, preço 20. Não usa o cenário fixo de default_for.
+        let multiples = core_multiples(20.0, Some(5.0), Some(30.0), Some(5.0), Some(1.0));
+        let graham = multiples.graham_fair_value.expect("graham");
+        let bazin = multiples.bazin_ceiling_price.expect("bazin");
+        assert!((graham - (22.5 * 5.0 * 30.0_f64).sqrt()).abs() < 1e-9);
+        assert!(graham > 50.0);
+        assert!((bazin - (5.0 / 0.06)).abs() < 1e-9);
+        assert!(bazin > 80.0);
     }
 
     #[test]

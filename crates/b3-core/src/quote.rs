@@ -26,6 +26,24 @@ pub struct Candle {
     pub adjusted_close: f64,
 }
 
+/// Início do dia civil em Brasília (UTC−3, sem horário de verão), em milissegundos Unix.
+pub fn brt_day_start_ms(timestamp_ms: i64) -> i64 {
+    const BRT_OFFSET_MS: i64 = 3 * 3_600_000;
+    let brt_ms = timestamp_ms - BRT_OFFSET_MS;
+    let day = brt_ms.div_euclid(86_400_000);
+    day * 86_400_000 + BRT_OFFSET_MS
+}
+
+/// Hora e minuto em Brasília a partir de um instante Unix em milissegundos.
+pub fn brt_hour_minute(timestamp_ms: i64) -> (u32, u32) {
+    const BRT_OFFSET_MS: i64 = 3 * 3_600_000;
+    let brt_ms = timestamp_ms - BRT_OFFSET_MS;
+    let seconds = brt_ms.div_euclid(1000).rem_euclid(86_400);
+    let hour = (seconds / 3_600) as u32;
+    let minute = ((seconds % 3_600) / 60) as u32;
+    (hour, minute)
+}
+
 impl Candle {
     pub fn to_gpu_candle(&self, base_timestamp_sec: f32) -> GpuCandle {
         let ts_sec = (self.timestamp_ms as f64 / 1000.0) as f32 - base_timestamp_sec;

@@ -1,4 +1,4 @@
-use b3_analytics::{ScreenerCriteria, ScreenerEngine};
+use b3_analytics::{multiples_from_accounts, CoreMultiples, ScreenerCriteria, ScreenerEngine};
 use b3_core::fii::FiiDetails;
 use b3_core::indicators::StockIndicators;
 use b3_core::quote::{Candle, GpuCandle, OrderBook, OrderBookLevel, Tick};
@@ -19,6 +19,12 @@ use eframe::egui::{self, Color32, RichText, Sense, Vec2};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+mod market_feed;
+mod presentation;
+
+use market_feed::{MarketEvent, QuoteTick};
+use presentation::{format_metric, fundamentals_caption, price_caption, MetricId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActiveView {
@@ -54,6 +60,12 @@ struct AppState {
     fii_details: HashMap<String, FiiDetails>,
     candles: HashMap<String, Vec<Candle>>,
     current_prices: HashMap<String, f64>,
+    sim_prices: HashMap<String, f64>,
+    market_as_of: HashMap<String, i64>,
+    cvm_year: HashMap<String, i32>,
+    cvm_accounts: HashMap<String, Vec<(String, f64)>>,
+    core_multiples: HashMap<String, CoreMultiples>,
+    market_rx: crossbeam_channel::Receiver<MarketEvent>,
 
     // Real-time market terminal
     order_book: OrderBook,
@@ -134,6 +146,11 @@ impl AppState {
         let mut fii_details = HashMap::new();
         let mut candles = HashMap::new();
         let mut current_prices = HashMap::new();
+        let mut sim_prices = HashMap::new();
+        let mut market_as_of = HashMap::new();
+        let mut cvm_year = HashMap::new();
+        let mut cvm_accounts = HashMap::new();
+        let mut core_multiples = HashMap::new();
 
         for t in &tickers {
             let ind = StockIndicators::default_for(t);
@@ -146,37 +163,32 @@ impl AppState {
                 fii_details.insert(t.clone(), FiiDetails::default_for(t));
             }
 
-            // Load existing candles from database if available, otherwise generate
             let existing_quotes = db.get_quotes(t, 180).unwrap_or_default();
             let sym_candles = if !existing_quotes.is_empty() {
                 existing_quotes
             } else {
-                let mut sym_candles = Vec::new();
-                let mut p = base_price * 0.85;
-                let now = Utc::now().timestamp_millis();
-                for i in (0..180).rev() {
-                    let day_ms = now - (i * 86_400_000);
-                    let delta = ((i as f64 * 7.3).sin() * 0.035) * p;
-                    let open = p;
-                    let close = (p + delta).max(1.0);
-                    let high = open.max(close) + (p * 0.015);
-                    let low = (open.min(close) - (p * 0.012)).max(0.5);
-                    let vol = 15_000_000.0 + ((i as f64 * 3.1).cos().abs() * 30_000_000.0);
-                    p = close;
-                    sym_candles.push(Candle {
-                        timestamp_ms: day_ms,
-                        open,
-                        high,
-                        low,
-                        close,
-                        volume: vol,
-                        trades: 1200,
-                        adjusted_close: close,
-                    });
-                }
-                let _ = db.insert_quotes(t, &sym_candles);
-                sym_candles
+                synthetic_candles(base_price)
             };
+            if let Ok(Some((candle, fetched_at))) = db.latest_market_quote(t) {
+                current_prices.insert(t.clone(), candle.close);
+                market_as_of.insert(t.clone(), fetched_at);
+                if let Some(ind) = stock_indicators.get_mut(t) {
+                    ind.price = candle.close;
+                }
+            }
+            if AssetClass::from_symbol(t) != AssetClass::Fii {
+                if let Ok(Some((year, accounts))) = db.load_cvm_accounts(t) {
+                    let price = *current_prices.get(t).unwrap_or(&base_price);
+                    let multiples = multiples_from_accounts(price, &accounts);
+                    if let Some(ind) = stock_indicators.get_mut(t) {
+                        copy_core_onto(ind, &multiples);
+                    }
+                    cvm_year.insert(t.clone(), year);
+                    core_multiples.insert(t.clone(), multiples);
+                    cvm_accounts.insert(t.clone(), accounts);
+                }
+            }
+            sim_prices.insert(t.clone(), *current_prices.get(t).unwrap_or(&base_price));
             candles.insert(t.clone(), sym_candles);
         }
 
@@ -225,6 +237,7 @@ impl AppState {
             bids,
             asks,
         };
+        let market_rx = market_feed::spawn(db.clone());
 
         Self {
             active_view: ActiveView::StatusInvest,
@@ -244,6 +257,12 @@ impl AppState {
             fii_details,
             candles,
             current_prices,
+            sim_prices,
+            market_as_of,
+            cvm_year,
+            cvm_accounts,
+            core_multiples,
+            market_rx,
             order_book,
             recent_ticks: Vec::new(),
             is_live_sim_running: true,
@@ -280,6 +299,7 @@ impl AppState {
         let ind = StockIndicators::default_for(&sym);
         let base_price = ind.price;
         self.current_prices.insert(sym.clone(), base_price);
+        self.sim_prices.insert(sym.clone(), base_price);
         self.stock_indicators.insert(sym.clone(), ind);
         self.company_profiles.insert(sym.clone(), CompanyProfile::default_for(&sym));
 
@@ -291,33 +311,21 @@ impl AppState {
         let sym_candles = if !existing_quotes.is_empty() {
             existing_quotes
         } else {
-            let mut sym_candles = Vec::new();
-            let mut p = base_price * 0.85;
-            let now = Utc::now().timestamp_millis();
-            for i in (0..180).rev() {
-                let day_ms = now - (i * 86_400_000);
-                let delta = ((i as f64 * 7.3).sin() * 0.035) * p;
-                let open = p;
-                let close = (p + delta).max(1.0);
-                let high = open.max(close) + (p * 0.015);
-                let low = (open.min(close) - (p * 0.012)).max(0.5);
-                let vol = 15_000_000.0 + ((i as f64 * 3.1).cos().abs() * 30_000_000.0);
-                p = close;
-                sym_candles.push(Candle {
-                    timestamp_ms: day_ms,
-                    open,
-                    high,
-                    low,
-                    close,
-                    volume: vol,
-                    trades: 1200,
-                    adjusted_close: close,
-                });
-            }
-            let _ = self.db.insert_quotes(&sym, &sym_candles);
-            sym_candles
+            synthetic_candles(base_price)
         };
+        if let Ok(Some((candle, fetched_at))) = self.db.latest_market_quote(&sym) {
+            self.current_prices.insert(sym.clone(), candle.close);
+            self.market_as_of.insert(sym.clone(), fetched_at);
+            if let Some(ind) = self.stock_indicators.get_mut(&sym) {
+                ind.price = candle.close;
+            }
+        }
         self.candles.insert(sym.clone(), sym_candles);
+        if AssetClass::from_symbol(&sym) != AssetClass::Fii {
+            if let Ok(Some((year, accounts))) = self.db.load_cvm_accounts(&sym) {
+                self.store_cvm(&sym, year, accounts);
+            }
+        }
     }
 
     fn apply_selected_ticker(&mut self, ticker: &str) {
@@ -387,19 +395,10 @@ impl AppState {
         self.tick_counter += 1;
         let tickers = self.visible_tickers.clone();
         for sym in tickers {
-            let last_p = *self.current_prices.get(&sym).unwrap_or(&35.0);
+            let last_p = *self.sim_prices.get(&sym).unwrap_or(&35.0);
             let tick = LiveFeedClient::simulate_tick(&sym, last_p);
-            self.current_prices.insert(sym.clone(), tick.price);
+            self.sim_prices.insert(sym.clone(), tick.price);
 
-            // Update indicators price & valuation
-            if let Some(ind) = self.stock_indicators.get_mut(&sym) {
-                ind.price = tick.price;
-                if ind.lpa > 0.0 { ind.pl = tick.price / ind.lpa; }
-                if ind.vpa > 0.0 { ind.pvp = tick.price / ind.vpa; }
-                if tick.price > 0.0 { ind.dividend_yield = (ind.dpa / tick.price) * 100.0; }
-            }
-
-            // Update candle list
             if let Some(list) = self.candles.get_mut(&sym) {
                 if let Some(last_candle) = list.last_mut() {
                     last_candle.close = tick.price;
@@ -410,7 +409,6 @@ impl AppState {
             }
 
             if sym == self.selected_ticker {
-                // Update orderbook top level
                 if tick.is_buyer_aggressor {
                     if let Some(ask) = self.order_book.asks.first_mut() {
                         ask.price = tick.price;
@@ -426,10 +424,82 @@ impl AppState {
             }
         }
 
-        // Random pulse in heatmap
         if !self.heatmap_nodes.is_empty() {
             let node_idx = (self.tick_counter as usize) % self.heatmap_nodes.len();
             self.heatmap_nodes[node_idx].flash_intensity = 1.0;
+        }
+    }
+
+    fn drain_market_events(&mut self) {
+        while let Ok(event) = self.market_rx.try_recv() {
+            match event {
+                MarketEvent::Quotes(quotes) => {
+                    for quote in quotes {
+                        self.apply_quote(quote);
+                    }
+                }
+                MarketEvent::Cvm(rows) => {
+                    for row in rows {
+                        self.store_cvm(&row.ticker, row.year, row.accounts);
+                    }
+                }
+            }
+        }
+    }
+
+    fn apply_quote(&mut self, quote: QuoteTick) {
+        self.current_prices.insert(quote.symbol.clone(), quote.close);
+        self.market_as_of.insert(quote.symbol.clone(), quote.fetched_at_ms);
+        self.sim_prices.entry(quote.symbol.clone()).or_insert(quote.close);
+        if let Some(ind) = self.stock_indicators.get_mut(&quote.symbol) {
+            ind.price = quote.close;
+        }
+        if let Some(accounts) = self.cvm_accounts.get(&quote.symbol).cloned() {
+            self.recompute_core(&quote.symbol, quote.close, &accounts);
+        }
+    }
+
+    fn store_cvm(&mut self, ticker: &str, year: i32, accounts: Vec<(String, f64)>) {
+        if AssetClass::from_symbol(ticker) == AssetClass::Fii {
+            return;
+        }
+        let price = self
+            .current_prices
+            .get(ticker)
+            .copied()
+            .unwrap_or_else(|| {
+                self.stock_indicators
+                    .get(ticker)
+                    .map(|ind| ind.price)
+                    .unwrap_or(0.0)
+            });
+        self.cvm_year.insert(ticker.to_string(), year);
+        self.cvm_accounts.insert(ticker.to_string(), accounts.clone());
+        self.recompute_core(ticker, price, &accounts);
+    }
+
+    fn recompute_core(&mut self, ticker: &str, price: f64, accounts: &[(String, f64)]) {
+        let multiples = multiples_from_accounts(price, accounts);
+        if let Some(ind) = self.stock_indicators.get_mut(ticker) {
+            copy_core_onto(ind, &multiples);
+            ind.price = price;
+        }
+        self.core_multiples.insert(ticker.to_string(), multiples);
+    }
+
+    fn shown_price(&self, sym: &str, fallback: f64) -> f64 {
+        if self.market_as_of.contains_key(sym) {
+            self.current_prices.get(sym).copied().unwrap_or(fallback)
+        } else {
+            fallback
+        }
+    }
+
+    fn metric(&self, sym: &str, metric: MetricId, local_display: &str) -> String {
+        if self.cvm_year.contains_key(sym) {
+            format_metric(self.core_multiples.get(sym), metric)
+        } else {
+            local_display.to_string()
         }
     }
 }
@@ -437,6 +507,8 @@ impl AppState {
 impl eframe::App for AppState {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.telemetry.on_frame();
+        self.drain_market_events();
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
 
         // High-frequency refresh simulation
         if self.is_live_sim_running {
@@ -723,12 +795,15 @@ impl AppState {
                         .show(col, |ui| {
                             // Column Header
                             ui.horizontal(|ui| {
+                                let price = self.shown_price(sym, ind.price);
                                 ui.heading(RichText::new(sym).strong().color(Color32::from_rgb(0, 210, 160)).size(18.0));
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.label(RichText::new(format!("R$ {:.2}", ind.price)).strong().color(Color32::WHITE).size(18.0));
+                                    ui.label(RichText::new(format!("R$ {price:.2}")).strong().color(Color32::WHITE).size(18.0));
                                 });
                             });
                             ui.label(RichText::new(&profile.name).color(Color32::from_rgb(180, 195, 210)).size(12.0));
+                            ui.label(RichText::new(price_caption(self.market_as_of.get(sym).copied())).color(Color32::GRAY).size(11.0));
+                            ui.label(RichText::new(fundamentals_caption(self.cvm_year.get(sym).copied())).color(Color32::GRAY).size(11.0));
                             ui.label(RichText::new(&profile.subsector).color(Color32::GRAY).size(11.0));
 
                             ui.add_space(4.0);
@@ -757,10 +832,19 @@ impl AppState {
                                 .show(ui, |ui| {
                                     ui.label(RichText::new("Preço Justo Graham").strong().size(11.0));
                                     ui.horizontal(|ui| {
-                                        ui.label(RichText::new(format!("R$ {:.2}", ind.graham_fair_value)).strong().color(Color32::from_rgb(0, 210, 160)));
-                                        let upside = if ind.price > 0.0 { ((ind.graham_fair_value - ind.price) / ind.price) * 100.0 } else { 0.0 };
-                                        let up_col = if upside >= 0.0 { Color32::from_rgb(0, 220, 140) } else { Color32::from_rgb(255, 80, 90) };
-                                        ui.label(RichText::new(format!("{:+.1}%", upside)).color(up_col).size(11.0));
+                                        let price = self.shown_price(sym, ind.price);
+                                        let graham_txt = self.metric(sym, MetricId::Graham, &format!("R$ {:.2}", ind.graham_fair_value));
+                                        ui.label(RichText::new(graham_txt).strong().color(Color32::from_rgb(0, 210, 160)));
+                                        let fair = if self.cvm_year.contains_key(sym) {
+                                            self.core_multiples.get(sym).and_then(|m| m.graham_fair_value)
+                                        } else {
+                                            Some(ind.graham_fair_value)
+                                        };
+                                        if let Some(fair) = fair.filter(|_| price > 0.0) {
+                                            let upside = ((fair - price) / price) * 100.0;
+                                            let up_col = if upside >= 0.0 { Color32::from_rgb(0, 220, 140) } else { Color32::from_rgb(255, 80, 90) };
+                                            ui.label(RichText::new(format!("{upside:+.1}%")).color(up_col).size(11.0));
+                                        }
                                     });
                                 });
 
@@ -773,10 +857,17 @@ impl AppState {
                                 .show(ui, |ui| {
                                     ui.label(RichText::new("Preço Teto Bazin (6%)").strong().size(11.0));
                                     ui.horizontal(|ui| {
-                                        let bazin_p = ind.dpa / 0.06;
-                                        ui.label(RichText::new(format!("R$ {:.2}", bazin_p)).strong().color(Color32::from_rgb(100, 180, 255)));
-                                        let margin = if bazin_p > 0.0 { ((bazin_p - ind.price) / bazin_p) * 100.0 } else { 0.0 };
-                                        ui.label(RichText::new(format!("Margem: {:.1}%", margin)).size(11.0));
+                                        let price = self.shown_price(sym, ind.price);
+                                        ui.label(RichText::new(self.metric(sym, MetricId::Bazin, &format!("R$ {:.2}", ind.bazin_ceiling_price))).strong().color(Color32::from_rgb(100, 180, 255)));
+                                        let fair = if self.cvm_year.contains_key(sym) {
+                                            self.core_multiples.get(sym).and_then(|m| m.bazin_ceiling_price)
+                                        } else {
+                                            Some(ind.bazin_ceiling_price)
+                                        };
+                                        if let Some(fair) = fair.filter(|fair| *fair > 0.0) {
+                                            let margin = ((fair - price) / fair) * 100.0;
+                                            ui.label(RichText::new(format!("Margem: {margin:.1}%")).size(11.0));
+                                        }
                                     });
                                 });
 
@@ -788,9 +879,13 @@ impl AppState {
                                 .inner_margin(6.0)
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
-                                        ui.label(RichText::new(format!("Piotroski: {}/9", ind.piotroski_f_score)).strong().color(Color32::from_rgb(0, 220, 140)).size(11.0));
-                                        if ind.altman_z_score > 0.0 {
-                                            ui.label(RichText::new(format!("Z: {:.2}", ind.altman_z_score)).size(11.0));
+                                        if self.cvm_year.contains_key(sym) {
+                                            ui.label(RichText::new("Piotroski: indisponível").strong().size(11.0));
+                                        } else {
+                                            ui.label(RichText::new(format!("Piotroski: {}/9", ind.piotroski_f_score)).strong().color(Color32::from_rgb(0, 220, 140)).size(11.0));
+                                            if ind.altman_z_score > 0.0 {
+                                                ui.label(RichText::new(format!("Z: {:.2}", ind.altman_z_score)).size(11.0));
+                                            }
                                         }
                                     });
                                 });
@@ -817,18 +912,18 @@ impl AppState {
                             egui::Grid::new(format!("mini_grid_{}", sym))
                                 .spacing([10.0, 3.0])
                                 .show(ui, |ui| {
-                                    ui.label("P/L:"); ui.label(RichText::new(format!("{:.2}", ind.pl)).strong()); ui.end_row();
-                                    ui.label("P/VP:"); ui.label(RichText::new(format!("{:.2}", ind.pvp)).strong()); ui.end_row();
-                                    ui.label("EV/EBITDA:"); ui.label(format!("{:.2}", ind.ev_ebitda)); ui.end_row();
-                                    ui.label("Div. Yield:"); ui.label(RichText::new(format!("{:.2}%", ind.dividend_yield)).color(Color32::from_rgb(0, 220, 140))); ui.end_row();
-                                    ui.label("ROE:"); ui.label(format!("{:.1}%", ind.roe)); ui.end_row();
-                                    ui.label("ROIC:"); ui.label(format!("{:.1}%", ind.roic)); ui.end_row();
-                                    ui.label("Mg. Líquida:"); ui.label(format!("{:.1}%", ind.margem_liquida)); ui.end_row();
-                                    ui.label("Dív.Líq/EBITDA:"); ui.label(format!("{:.2}", ind.divida_liq_ebitda)); ui.end_row();
-                                    ui.label("Liq. Corrente:"); ui.label(format!("{:.2}", ind.liquidez_corrente)); ui.end_row();
-                                    ui.label("LPA:"); ui.label(format!("R$ {:.2}", ind.lpa)); ui.end_row();
-                                    ui.label("VPA:"); ui.label(format!("R$ {:.2}", ind.vpa)); ui.end_row();
-                                    ui.label("DPA:"); ui.label(format!("R$ {:.2}", ind.dpa)); ui.end_row();
+                                    ui.label("P/L:"); ui.label(RichText::new(self.metric(sym, MetricId::Pl, &format!("{:.2}", ind.pl))).strong()); ui.end_row();
+                                    ui.label("P/VP:"); ui.label(RichText::new(self.metric(sym, MetricId::Pvp, &format!("{:.2}", ind.pvp))).strong()); ui.end_row();
+                                    ui.label("EV/EBITDA:"); ui.label(self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.ev_ebitda))); ui.end_row();
+                                    ui.label("Div. Yield:"); ui.label(RichText::new(self.metric(sym, MetricId::DividendYield, &format!("{:.2}%", ind.dividend_yield))).color(Color32::from_rgb(0, 220, 140))); ui.end_row();
+                                    ui.label("ROE:"); ui.label(self.metric(sym, MetricId::Outside, &format!("{:.1}%", ind.roe))); ui.end_row();
+                                    ui.label("ROIC:"); ui.label(self.metric(sym, MetricId::Outside, &format!("{:.1}%", ind.roic))); ui.end_row();
+                                    ui.label("Mg. Líquida:"); ui.label(self.metric(sym, MetricId::Outside, &format!("{:.1}%", ind.margem_liquida))); ui.end_row();
+                                    ui.label("Dív.Líq/EBITDA:"); ui.label(self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.divida_liq_ebitda))); ui.end_row();
+                                    ui.label("Liq. Corrente:"); ui.label(self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.liquidez_corrente))); ui.end_row();
+                                    ui.label("LPA:"); ui.label(self.metric(sym, MetricId::Lpa, &format!("R$ {:.2}", ind.lpa))); ui.end_row();
+                                    ui.label("VPA:"); ui.label(self.metric(sym, MetricId::Vpa, &format!("R$ {:.2}", ind.vpa))); ui.end_row();
+                                    ui.label("DPA:"); ui.label(self.metric(sym, MetricId::Dpa, &format!("R$ {:.2}", ind.dpa))); ui.end_row();
                                 });
                         });
                 }
@@ -889,8 +984,10 @@ impl AppState {
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.vertical(|ui| {
-                                ui.label(RichText::new(format!("R$ {:.2}", ind.price)).strong().size(28.0).color(Color32::from_rgb(0, 220, 140)));
-                                ui.label(RichText::new("Cotação Atual (B3)").color(Color32::GRAY).size(11.0));
+                                let price = self.shown_price(sym, ind.price);
+                                ui.label(RichText::new(format!("R$ {price:.2}")).strong().size(28.0).color(Color32::from_rgb(0, 220, 140)));
+                                ui.label(RichText::new(price_caption(self.market_as_of.get(sym).copied())).color(Color32::GRAY).size(11.0));
+                                ui.label(RichText::new(fundamentals_caption(self.cvm_year.get(sym).copied())).color(Color32::GRAY).size(11.0));
                             });
                         });
                     });
@@ -901,13 +998,15 @@ impl AppState {
             // Key KPI Highlight Cards (Status Invest Style)
             ui.horizontal(|ui| {
                 let card_w = (ui.available_width() - 40.0) / 6.0;
+                let ev_ebitda = if ind.ev_ebitda > 0.0 { format!("{:.2}", ind.ev_ebitda) } else { "-".to_string() };
+                let roic = if ind.roic > 0.0 { format!("{:.2}%", ind.roic) } else { "-".to_string() };
                 let kpis = [
-                    ("DIVIDEND YIELD", format!("{:.2}%", ind.dividend_yield), Color32::from_rgb(0, 210, 160)),
-                    ("P/L", format!("{:.2}", ind.pl), Color32::from_rgb(255, 200, 80)),
-                    ("P/VP", format!("{:.2}", ind.pvp), Color32::from_rgb(100, 180, 255)),
-                    ("EV/EBITDA", if ind.ev_ebitda > 0.0 { format!("{:.2}", ind.ev_ebitda) } else { "-".to_string() }, Color32::WHITE),
-                    ("ROE", format!("{:.2}%", ind.roe), Color32::from_rgb(0, 210, 160)),
-                    ("ROIC", if ind.roic > 0.0 { format!("{:.2}%", ind.roic) } else { "-".to_string() }, Color32::from_rgb(140, 220, 255)),
+                    ("DIVIDEND YIELD", self.metric(sym, MetricId::DividendYield, &format!("{:.2}%", ind.dividend_yield)), Color32::from_rgb(0, 210, 160)),
+                    ("P/L", self.metric(sym, MetricId::Pl, &format!("{:.2}", ind.pl)), Color32::from_rgb(255, 200, 80)),
+                    ("P/VP", self.metric(sym, MetricId::Pvp, &format!("{:.2}", ind.pvp)), Color32::from_rgb(100, 180, 255)),
+                    ("EV/EBITDA", self.metric(sym, MetricId::Outside, &ev_ebitda), Color32::WHITE),
+                    ("ROE", self.metric(sym, MetricId::Outside, &format!("{:.2}%", ind.roe)), Color32::from_rgb(0, 210, 160)),
+                    ("ROIC", self.metric(sym, MetricId::Outside, &roic), Color32::from_rgb(140, 220, 255)),
                 ];
 
                 for (label, val, color) in kpis {
@@ -939,10 +1038,19 @@ impl AppState {
                         ui.label(RichText::new("Preço Justo de Graham").strong().color(Color32::WHITE).size(14.0));
                         ui.label(RichText::new("Fórmula: sqrt(22.5 * LPA * VPA)").color(Color32::GRAY).size(11.0));
                         ui.add_space(4.0);
-                        ui.label(RichText::new(format!("R$ {:.2}", ind.graham_fair_value)).strong().color(Color32::from_rgb(0, 210, 160)).size(20.0));
-                        let upside = if ind.price > 0.0 { ((ind.graham_fair_value - ind.price) / ind.price) * 100.0 } else { 0.0 };
-                        let color = if upside >= 0.0 { Color32::from_rgb(0, 220, 140) } else { Color32::from_rgb(255, 80, 90) };
-                        ui.label(RichText::new(format!("Margem / Upside: {:+.1}%", upside)).color(color).size(12.0));
+                        let price = self.shown_price(sym, ind.price);
+                        let graham_txt = self.metric(sym, MetricId::Graham, &format!("R$ {:.2}", ind.graham_fair_value));
+                        ui.label(RichText::new(graham_txt).strong().color(Color32::from_rgb(0, 210, 160)).size(20.0));
+                        let fair = if self.cvm_year.contains_key(sym) {
+                            self.core_multiples.get(sym).and_then(|m| m.graham_fair_value)
+                        } else {
+                            Some(ind.graham_fair_value)
+                        };
+                        if let Some(fair) = fair.filter(|_| price > 0.0) {
+                            let upside = ((fair - price) / price) * 100.0;
+                            let color = if upside >= 0.0 { Color32::from_rgb(0, 220, 140) } else { Color32::from_rgb(255, 80, 90) };
+                            ui.label(RichText::new(format!("Margem / Upside: {upside:+.1}%")).color(color).size(12.0));
+                        }
                     });
 
                 // Décio Bazin Card
@@ -952,14 +1060,24 @@ impl AppState {
                     .show(ui, |ui| {
                         ui.set_width(col_w);
                         ui.label(RichText::new("Preço Teto Bazin").strong().color(Color32::WHITE).size(14.0));
-                        ui.horizontal(|ui| {
-                            ui.label("Yield Alvo:");
-                            ui.add(egui::Slider::new(&mut self.bazin_target_yield, 4.0..=12.0).suffix("%"));
-                        });
-                        let bazin_price = if self.bazin_target_yield > 0.0 { ind.dpa / (self.bazin_target_yield / 100.0) } else { 0.0 };
-                        ui.label(RichText::new(format!("R$ {:.2}", bazin_price)).strong().color(Color32::from_rgb(100, 180, 255)).size(20.0));
-                        let margin = if bazin_price > 0.0 { ((bazin_price - ind.price) / bazin_price) * 100.0 } else { 0.0 };
-                        ui.label(RichText::new(format!("Margem de Segurança: {:.1}%", margin)).color(Color32::WHITE).size(12.0));
+                        if self.cvm_year.contains_key(sym) {
+                            ui.label(RichText::new("DPA / 6%").color(Color32::GRAY).size(11.0));
+                            let price = self.shown_price(sym, ind.price);
+                            ui.label(RichText::new(self.metric(sym, MetricId::Bazin, &format!("R$ {:.2}", ind.bazin_ceiling_price))).strong().color(Color32::from_rgb(100, 180, 255)).size(20.0));
+                            if let Some(fair) = self.core_multiples.get(sym).and_then(|m| m.bazin_ceiling_price).filter(|fair| *fair > 0.0) {
+                                let margin = ((fair - price) / fair) * 100.0;
+                                ui.label(RichText::new(format!("Margem de Segurança: {margin:.1}%")).color(Color32::WHITE).size(12.0));
+                            }
+                        } else {
+                            ui.horizontal(|ui| {
+                                ui.label("Yield Alvo:");
+                                ui.add(egui::Slider::new(&mut self.bazin_target_yield, 4.0..=12.0).suffix("%"));
+                            });
+                            let bazin_price = if self.bazin_target_yield > 0.0 { ind.dpa / (self.bazin_target_yield / 100.0) } else { 0.0 };
+                            ui.label(RichText::new(format!("R$ {bazin_price:.2}")).strong().color(Color32::from_rgb(100, 180, 255)).size(20.0));
+                            let margin = if bazin_price > 0.0 { ((bazin_price - ind.price) / bazin_price) * 100.0 } else { 0.0 };
+                            ui.label(RichText::new(format!("Margem de Segurança: {margin:.1}%")).color(Color32::WHITE).size(12.0));
+                        }
                     });
 
                 // Piotroski & Altman Score Card
@@ -1021,48 +1139,45 @@ impl AppState {
                 .inner_margin(12.0)
                 .show(ui, |ui| {
                     ui.heading(RichText::new("Matriz Completa de Indicadores Fundamentalistas").color(Color32::WHITE).size(16.0));
+                    ui.label(RichText::new(fundamentals_caption(self.cvm_year.get(sym).copied())).color(Color32::GRAY).size(12.0));
                     ui.add_space(6.0);
 
                     ui.columns(4, |cols| {
-                        // Col 1: Valuation
                         cols[0].label(RichText::new("VALUATION").strong().color(Color32::from_rgb(100, 180, 255)));
-                        cols[0].label(format!("P/L: {:.2}", ind.pl));
-                        cols[0].label(format!("P/VP: {:.2}", ind.pvp));
-                        cols[0].label(format!("EV/EBITDA: {:.2}", ind.ev_ebitda));
-                        cols[0].label(format!("EV/EBIT: {:.2}", ind.ev_ebit));
-                        cols[0].label(format!("P/EBITDA: {:.2}", ind.p_ebitda));
-                        cols[0].label(format!("P/SR: {:.2}", ind.p_sr));
-                        cols[0].label(format!("P/Ativo: {:.2}", ind.p_ativo));
-                        cols[0].label(format!("P/Cap. Giro: {:.2}", ind.p_cap_giro));
+                        cols[0].label(format!("P/L: {}", self.metric(sym, MetricId::Pl, &format!("{:.2}", ind.pl))));
+                        cols[0].label(format!("P/VP: {}", self.metric(sym, MetricId::Pvp, &format!("{:.2}", ind.pvp))));
+                        cols[0].label(format!("EV/EBITDA: {}", self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.ev_ebitda))));
+                        cols[0].label(format!("EV/EBIT: {}", self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.ev_ebit))));
+                        cols[0].label(format!("P/EBITDA: {}", self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.p_ebitda))));
+                        cols[0].label(format!("P/SR: {}", self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.p_sr))));
+                        cols[0].label(format!("P/Ativo: {}", self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.p_ativo))));
+                        cols[0].label(format!("P/Cap. Giro: {}", self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.p_cap_giro))));
 
-                        // Col 2: Endividamento & Liquidez
                         cols[1].label(RichText::new("ENDIVIDAMENTO").strong().color(Color32::from_rgb(255, 180, 100)));
-                        cols[1].label(format!("Dív. Líq./PL: {:.2}", ind.divida_liq_pl));
-                        cols[1].label(format!("Dív. Líq./EBITDA: {:.2}", ind.divida_liq_ebitda));
-                        cols[1].label(format!("Dív. Líq./EBIT: {:.2}", ind.divida_liq_ebit));
-                        cols[1].label(format!("PL / Ativos: {:.2}", ind.pl_ativos));
-                        cols[1].label(format!("Passivos / Ativos: {:.2}", ind.passivos_ativos));
-                        cols[1].label(format!("Liq. Corrente: {:.2}", ind.liquidez_corrente));
-                        cols[1].label(format!("Liq. Seca: {:.2}", ind.liquidez_seca));
+                        cols[1].label(format!("Dív. Líq./PL: {}", self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.divida_liq_pl))));
+                        cols[1].label(format!("Dív. Líq./EBITDA: {}", self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.divida_liq_ebitda))));
+                        cols[1].label(format!("Dív. Líq./EBIT: {}", self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.divida_liq_ebit))));
+                        cols[1].label(format!("PL / Ativos: {}", self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.pl_ativos))));
+                        cols[1].label(format!("Passivos / Ativos: {}", self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.passivos_ativos))));
+                        cols[1].label(format!("Liq. Corrente: {}", self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.liquidez_corrente))));
+                        cols[1].label(format!("Liq. Seca: {}", self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.liquidez_seca))));
 
-                        // Col 3: Eficiência Operacional
                         cols[2].label(RichText::new("EFICIÊNCIA").strong().color(Color32::from_rgb(0, 220, 140)));
-                        cols[2].label(format!("Margem Bruta: {:.1}%", ind.margem_bruta));
-                        cols[2].label(format!("Margem EBITDA: {:.1}%", ind.margem_ebitda));
-                        cols[2].label(format!("Margem EBIT: {:.1}%", ind.margem_ebit));
-                        cols[2].label(format!("Margem Líquida: {:.1}%", ind.margem_liquida));
-                        cols[2].label(format!("Giro Ativos: {:.2}", ind.giro_ativos));
+                        cols[2].label(format!("Margem Bruta: {}", self.metric(sym, MetricId::Outside, &format!("{:.1}%", ind.margem_bruta))));
+                        cols[2].label(format!("Margem EBITDA: {}", self.metric(sym, MetricId::Outside, &format!("{:.1}%", ind.margem_ebitda))));
+                        cols[2].label(format!("Margem EBIT: {}", self.metric(sym, MetricId::Outside, &format!("{:.1}%", ind.margem_ebit))));
+                        cols[2].label(format!("Margem Líquida: {}", self.metric(sym, MetricId::Outside, &format!("{:.1}%", ind.margem_liquida))));
+                        cols[2].label(format!("Giro Ativos: {}", self.metric(sym, MetricId::Outside, &format!("{:.2}", ind.giro_ativos))));
 
-                        // Col 4: Rentabilidade & Crescimento
                         cols[3].label(RichText::new("RENTABILIDADE & 5A").strong().color(Color32::from_rgb(180, 140, 255)));
-                        cols[3].label(format!("ROE: {:.1}%", ind.roe));
-                        cols[3].label(format!("ROIC: {:.1}%", ind.roic));
-                        cols[3].label(format!("ROA: {:.1}%", ind.roa));
-                        cols[3].label(format!("CAGR Receitas: {:.1}%", ind.cagr_receitas_5a));
-                        cols[3].label(format!("CAGR Lucros: {:.1}%", ind.cagr_lucros_5a));
-                        cols[3].label(format!("LPA: R$ {:.2}", ind.lpa));
-                        cols[3].label(format!("VPA: R$ {:.2}", ind.vpa));
-                        cols[3].label(format!("DPA: R$ {:.2}", ind.dpa));
+                        cols[3].label(format!("ROE: {}", self.metric(sym, MetricId::Outside, &format!("{:.1}%", ind.roe))));
+                        cols[3].label(format!("ROIC: {}", self.metric(sym, MetricId::Outside, &format!("{:.1}%", ind.roic))));
+                        cols[3].label(format!("ROA: {}", self.metric(sym, MetricId::Outside, &format!("{:.1}%", ind.roa))));
+                        cols[3].label(format!("CAGR Receitas: {}", self.metric(sym, MetricId::Outside, &format!("{:.1}%", ind.cagr_receitas_5a))));
+                        cols[3].label(format!("CAGR Lucros: {}", self.metric(sym, MetricId::Outside, &format!("{:.1}%", ind.cagr_lucros_5a))));
+                        cols[3].label(format!("LPA: {}", self.metric(sym, MetricId::Lpa, &format!("R$ {:.2}", ind.lpa))));
+                        cols[3].label(format!("VPA: {}", self.metric(sym, MetricId::Vpa, &format!("R$ {:.2}", ind.vpa))));
+                        cols[3].label(format!("DPA: {}", self.metric(sym, MetricId::Dpa, &format!("R$ {:.2}", ind.dpa))));
                     });
                 });
         });
@@ -1074,40 +1189,44 @@ impl AppState {
             .inner_margin(12.0)
             .show(ui, |ui| {
                 ui.heading(RichText::new("Matriz Comparativa de Indicadores Fundamentalistas").color(Color32::WHITE).size(16.0));
+                ui.label(RichText::new("P/L, P/VP, dividend yield, Graham e Bazin usam a CVM quando o período existe. O restante é cenário local ou fica indisponível.").color(Color32::GRAY).size(12.0));
                 ui.add_space(6.0);
 
-                let indicators: Vec<StockIndicators> = self.visible_tickers
+                let indicators: Vec<(String, StockIndicators)> = self.visible_tickers
                     .iter()
-                    .map(|t| self.stock_indicators.get(t).cloned().unwrap_or_else(|| StockIndicators::default_for(t)))
+                    .map(|t| {
+                        let ind = self.stock_indicators.get(t).cloned().unwrap_or_else(|| StockIndicators::default_for(t));
+                        (t.clone(), ind)
+                    })
                     .collect();
 
-                let metrics: &[(&str, fn(&StockIndicators) -> String)] = &[
-                    ("Preço Atual", |i| format!("R$ {:.2}", i.price)),
-                    ("P/L", |i| format!("{:.2}", i.pl)),
-                    ("P/VP", |i| format!("{:.2}", i.pvp)),
-                    ("EV/EBITDA", |i| format!("{:.2}", i.ev_ebitda)),
-                    ("EV/EBIT", |i| format!("{:.2}", i.ev_ebit)),
-                    ("P/SR", |i| format!("{:.2}", i.p_sr)),
-                    ("P/Ativo", |i| format!("{:.2}", i.p_ativo)),
-                    ("Dividend Yield", |i| format!("{:.2}%", i.dividend_yield)),
-                    ("ROE", |i| format!("{:.2}%", i.roe)),
-                    ("ROIC", |i| format!("{:.2}%", i.roic)),
-                    ("ROA", |i| format!("{:.2}%", i.roa)),
-                    ("Margem Bruta", |i| format!("{:.1}%", i.margem_bruta)),
-                    ("Margem EBITDA", |i| format!("{:.1}%", i.margem_ebitda)),
-                    ("Margem EBIT", |i| format!("{:.1}%", i.margem_ebit)),
-                    ("Margem Líquida", |i| format!("{:.1}%", i.margem_liquida)),
-                    ("Dívida Líq./PL", |i| format!("{:.2}", i.divida_liq_pl)),
-                    ("Dívida Líq./EBITDA", |i| format!("{:.2}", i.divida_liq_ebitda)),
-                    ("Liquidez Corrente", |i| format!("{:.2}", i.liquidez_corrente)),
-                    ("Liquidez Seca", |i| format!("{:.2}", i.liquidez_seca)),
-                    ("LPA", |i| format!("R$ {:.2}", i.lpa)),
-                    ("VPA", |i| format!("R$ {:.2}", i.vpa)),
-                    ("DPA", |i| format!("R$ {:.2}", i.dpa)),
-                    ("Preço Justo Graham", |i| format!("R$ {:.2}", i.graham_fair_value)),
-                    ("Preço Teto Bazin", |i| format!("R$ {:.2}", i.bazin_ceiling_price)),
-                    ("Score Piotroski", |i| format!("{}/9", i.piotroski_f_score)),
-                    ("Altman Z-Score", |i| if i.altman_z_score > 0.0 { format!("{:.2}", i.altman_z_score) } else { "-".to_string() }),
+                let rows: &[(&str, MetricId, fn(&StockIndicators) -> String)] = &[
+                    ("Preço Atual", MetricId::Outside, |i| format!("R$ {:.2}", i.price)),
+                    ("P/L", MetricId::Pl, |i| format!("{:.2}", i.pl)),
+                    ("P/VP", MetricId::Pvp, |i| format!("{:.2}", i.pvp)),
+                    ("EV/EBITDA", MetricId::Outside, |i| format!("{:.2}", i.ev_ebitda)),
+                    ("EV/EBIT", MetricId::Outside, |i| format!("{:.2}", i.ev_ebit)),
+                    ("P/SR", MetricId::Outside, |i| format!("{:.2}", i.p_sr)),
+                    ("P/Ativo", MetricId::Outside, |i| format!("{:.2}", i.p_ativo)),
+                    ("Dividend Yield", MetricId::DividendYield, |i| format!("{:.2}%", i.dividend_yield)),
+                    ("ROE", MetricId::Outside, |i| format!("{:.2}%", i.roe)),
+                    ("ROIC", MetricId::Outside, |i| format!("{:.2}%", i.roic)),
+                    ("ROA", MetricId::Outside, |i| format!("{:.2}%", i.roa)),
+                    ("Margem Bruta", MetricId::Outside, |i| format!("{:.1}%", i.margem_bruta)),
+                    ("Margem EBITDA", MetricId::Outside, |i| format!("{:.1}%", i.margem_ebitda)),
+                    ("Margem EBIT", MetricId::Outside, |i| format!("{:.1}%", i.margem_ebit)),
+                    ("Margem Líquida", MetricId::Outside, |i| format!("{:.1}%", i.margem_liquida)),
+                    ("Dívida Líq./PL", MetricId::Outside, |i| format!("{:.2}", i.divida_liq_pl)),
+                    ("Dívida Líq./EBITDA", MetricId::Outside, |i| format!("{:.2}", i.divida_liq_ebitda)),
+                    ("Liquidez Corrente", MetricId::Outside, |i| format!("{:.2}", i.liquidez_corrente)),
+                    ("Liquidez Seca", MetricId::Outside, |i| format!("{:.2}", i.liquidez_seca)),
+                    ("LPA", MetricId::Lpa, |i| format!("R$ {:.2}", i.lpa)),
+                    ("VPA", MetricId::Vpa, |i| format!("R$ {:.2}", i.vpa)),
+                    ("DPA", MetricId::Dpa, |i| format!("R$ {:.2}", i.dpa)),
+                    ("Preço Justo Graham", MetricId::Graham, |i| format!("R$ {:.2}", i.graham_fair_value)),
+                    ("Preço Teto Bazin", MetricId::Bazin, |i| format!("R$ {:.2}", i.bazin_ceiling_price)),
+                    ("Score Piotroski", MetricId::Outside, |i| format!("{}/9", i.piotroski_f_score)),
+                    ("Altman Z-Score", MetricId::Outside, |i| if i.altman_z_score > 0.0 { format!("{:.2}", i.altman_z_score) } else { "-".to_string() }),
                 ];
 
                 egui::Grid::new("comparison_matrix_grid")
@@ -1115,15 +1234,20 @@ impl AppState {
                     .spacing([20.0, 6.0])
                     .show(ui, |ui| {
                         ui.label(RichText::new("Indicador").strong());
-                        for t in &self.visible_tickers {
+                        for (t, _) in &indicators {
                             ui.label(RichText::new(t).strong().color(Color32::from_rgb(0, 210, 160)));
                         }
                         ui.end_row();
 
-                        for (name, extractor) in metrics {
+                        for (name, metric, local) in rows {
                             ui.label(*name);
-                            for ind in &indicators {
-                                ui.label(extractor(ind));
+                            for (sym, ind) in &indicators {
+                                let text = if *name == "Preço Atual" {
+                                    format!("R$ {:.2}", self.shown_price(sym, ind.price))
+                                } else {
+                                    self.metric(sym, *metric, &local(ind))
+                                };
+                                ui.label(text);
                             }
                             ui.end_row();
                         }
@@ -1143,7 +1267,7 @@ impl AppState {
             ui.label("Largura do Candle:");
             ui.add(egui::Slider::new(&mut self.chart_candle_width, 3.0..=20.0));
             ui.separator();
-            ui.checkbox(&mut self.is_live_sim_running, "Feed Real-Time (Ticks ao Vivo)");
+            ui.checkbox(&mut self.is_live_sim_running, "Simulação de ticks (book e tape)");
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if count < MAX_VISIBLE_ASSETS {
@@ -1323,7 +1447,7 @@ impl AppState {
 
             // Right 25%: Order Book & Times and Trades
             ui.vertical(|ui| {
-                ui.heading(RichText::new("Livro de Ofertas (Level 2)").size(15.0));
+                ui.heading(RichText::new("Livro de Ofertas (simulação)").size(15.0));
 
                 egui::Frame::group(ui.style())
                     .fill(Color32::from_rgb(20, 24, 32))
@@ -1343,7 +1467,7 @@ impl AppState {
                     });
 
                 ui.add_space(8.0);
-                ui.heading(RichText::new("Times & Trades (Últimos Ticks)").size(15.0));
+                ui.heading(RichText::new("Times & Trades (simulação)").size(15.0));
 
                 egui::Frame::group(ui.style())
                     .fill(Color32::from_rgb(20, 24, 32))
@@ -1375,7 +1499,7 @@ impl AppState {
         ui.horizontal(|ui| {
             ui.heading(RichText::new("Mapa de Mercado B3 (Heatmap GPU)").color(Color32::WHITE).size(18.0));
             ui.separator();
-            ui.label(RichText::new("Verde = Alta | Vermelho = Baixa | Pulso Branco = Ticks em Tempo Real").color(Color32::GRAY));
+            ui.label(RichText::new("Verde = Alta | Vermelho = Baixa | Pulso branco = simulação de ticks").color(Color32::GRAY));
         });
 
         ui.add_space(6.0);
@@ -1447,6 +1571,7 @@ impl AppState {
     fn render_screener_view(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.heading(RichText::new("Screener Fundamentalista Multi-Fator").size(18.0));
+            ui.label(RichText::new("Fora de P/L, P/VP, DY, Graham e Bazin, os números desta tela são cenário local.").color(Color32::GRAY));
             ui.separator();
             ui.label(RichText::new(format!("Estratégia: {}", self.screener_preset_name)).strong().color(Color32::from_rgb(0, 210, 160)));
         });
@@ -1679,6 +1804,44 @@ impl AppState {
             }
         });
     }
+}
+
+fn copy_core_onto(ind: &mut StockIndicators, multiples: &CoreMultiples) {
+    if let Some(value) = multiples.lpa { ind.lpa = value; }
+    if let Some(value) = multiples.vpa { ind.vpa = value; }
+    if let Some(value) = multiples.dpa { ind.dpa = value; }
+    if let Some(value) = multiples.pl { ind.pl = value; }
+    if let Some(value) = multiples.pvp { ind.pvp = value; }
+    if let Some(value) = multiples.dividend_yield { ind.dividend_yield = value; }
+    if let Some(value) = multiples.graham_fair_value { ind.graham_fair_value = value; }
+    if let Some(value) = multiples.bazin_ceiling_price { ind.bazin_ceiling_price = value; }
+}
+
+fn synthetic_candles(base_price: f64) -> Vec<Candle> {
+    let mut candles = Vec::with_capacity(180);
+    let mut price = base_price * 0.85;
+    let now = Utc::now().timestamp_millis();
+    for i in (0..180).rev() {
+        let day_ms = now - (i * 86_400_000);
+        let delta = ((i as f64 * 7.3).sin() * 0.035) * price;
+        let open = price;
+        let close = (price + delta).max(1.0);
+        let high = open.max(close) + (price * 0.015);
+        let low = (open.min(close) - (price * 0.012)).max(0.5);
+        let volume = 15_000_000.0 + ((i as f64 * 3.1).cos().abs() * 30_000_000.0);
+        price = close;
+        candles.push(Candle {
+            timestamp_ms: day_ms,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            trades: 1200,
+            adjusted_close: close,
+        });
+    }
+    candles
 }
 
 fn main() -> eframe::Result {

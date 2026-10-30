@@ -52,25 +52,48 @@ impl LiveFeedClient {
         }
 
         let data: BrapiResponse = resp.json().await?;
-        if let Some(res) = data.results.first() {
-            if let Some(price) = res.regular_market_price {
-                let high = res.regular_market_day_high.unwrap_or(price);
-                let low = res.regular_market_day_low.unwrap_or(price);
-                let volume = res.regular_market_volume.unwrap_or(0.0);
-                return Ok(Some(Candle {
-                    timestamp_ms: Utc::now().timestamp_millis(),
-                    open: price,
-                    high,
-                    low,
-                    close: price,
-                    volume,
-                    trades: 1,
-                    adjusted_close: price,
-                }));
-            }
-        }
-        Ok(None)
+        Ok(Self::candle_from_brapi(data, Utc::now().timestamp_millis()))
     }
+
+    pub fn parse_brapi_quote(body: &str, now_ms: i64) -> anyhow::Result<Option<Candle>> {
+        let data: BrapiResponse = serde_json::from_str(body)?;
+        Ok(Self::candle_from_brapi(data, now_ms))
+    }
+
+    fn candle_from_brapi(data: BrapiResponse, now_ms: i64) -> Option<Candle> {
+        let res = data.results.first()?;
+        let price = res.regular_market_price?;
+        let high = res.regular_market_day_high.unwrap_or(price);
+        let low = res.regular_market_day_low.unwrap_or(price);
+        let volume = res.regular_market_volume.unwrap_or(0.0);
+        Some(Candle {
+            timestamp_ms: now_ms,
+            open: price,
+            high,
+            low,
+            close: price,
+            volume,
+            trades: 1,
+            adjusted_close: price,
+        })
+    }
+
+    /// Pregão B3 em dias úteis, 10:00–18:00 no horário de Brasília.
+    pub fn is_b3_session(now_ms: i64) -> bool {
+        use chrono::{Datelike, TimeZone, Timelike, Utc};
+        let Some(utc) = Utc.timestamp_millis_opt(now_ms).single() else {
+            return false;
+        };
+        let brt = utc - chrono::Duration::hours(3);
+        let weekday = brt.weekday();
+        if weekday == chrono::Weekday::Sat || weekday == chrono::Weekday::Sun {
+            return false;
+        }
+        let minutes = brt.hour() * 60 + brt.minute();
+        (10 * 60..18 * 60).contains(&minutes)
+    }
+
+    pub const QUOTE_POLL_INTERVAL_MS: i64 = 5 * 60 * 1000;
 
     /// High-performance tick synthesizer for local hardware acceleration tests
     pub fn simulate_tick(symbol: &str, last_price: f64) -> Tick {
@@ -96,5 +119,39 @@ impl LiveFeedClient {
             seller_broker: (((h >> 8) % 30) + 1) as u16,
             is_buyer_aggressor: is_buyer,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_brapi_quote_without_network() {
+        let body = r#"{
+            "results": [{
+                "symbol": "PETR4",
+                "regularMarketPrice": 36.4,
+                "regularMarketDayHigh": 36.8,
+                "regularMarketDayLow": 36.1,
+                "regularMarketVolume": 1000.0
+            }]
+        }"#;
+        let candle = LiveFeedClient::parse_brapi_quote(body, 1_700_000_000_000)
+            .unwrap()
+            .unwrap();
+        assert!((candle.close - 36.4).abs() < 1e-9);
+        assert!((candle.high - 36.8).abs() < 1e-9);
+        assert_eq!(candle.timestamp_ms, 1_700_000_000_000);
+    }
+
+    #[test]
+    fn test_b3_session_skips_weekend_and_night() {
+        // 2024-06-03 was a Monday. 15:00 UTC = 12:00 BRT, inside the session.
+        let monday_noon_brt = 1_717_426_800_000;
+        assert!(LiveFeedClient::is_b3_session(monday_noon_brt));
+        // 02:00 UTC = 23:00 BRT of the previous day... use 03:00 UTC = 00:00 BRT Monday, outside.
+        let monday_midnight_brt = 1_717_383_600_000;
+        assert!(!LiveFeedClient::is_b3_session(monday_midnight_brt));
     }
 }
