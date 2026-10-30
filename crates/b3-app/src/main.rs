@@ -303,18 +303,18 @@ impl eframe::App for AppState {
 
         // Top Navigation & System Status Bar
         ui.horizontal(|ui| {
-            ui.label(RichText::new("⚡ BROKER-AÇÕES").strong().color(Color32::from_rgb(0, 210, 160)).size(17.0));
+            ui.label(RichText::new("BROKER-AÇÕES").strong().color(Color32::from_rgb(0, 210, 160)).size(17.0));
             ui.label(RichText::new("| B3 HARDWARE TERMINAL").color(Color32::from_rgb(160, 175, 190)).size(13.0));
 
             ui.separator();
 
             // View Selector Tabs
             let views = [
-                (ActiveView::StatusInvest, "📊 Status Invest"),
-                (ActiveView::GpuTerminal, "📈 Terminal GPU"),
-                (ActiveView::MarketHeatmap, "🗺️ Mapa B3"),
-                (ActiveView::Screener, "🔍 Screener SIMD"),
-                (ActiveView::PortfolioTax, "💼 Carteira & DARF"),
+                (ActiveView::StatusInvest, "Status Invest"),
+                (ActiveView::GpuTerminal, "Terminal GPU"),
+                (ActiveView::MarketHeatmap, "Mapa B3"),
+                (ActiveView::Screener, "Screener SIMD"),
+                (ActiveView::PortfolioTax, "Carteira & DARF"),
             ];
 
             for (view, label) in views {
@@ -327,7 +327,7 @@ impl eframe::App for AppState {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // GPU Telemetry Pill
                 let telemetry_text = format!(
-                    "⚡ Vulkan RADV | {:.0} FPS ({:.2}ms) | DrawCalls: 1",
+                    "Vulkan RADV | {:.0} FPS ({:.2}ms) | DrawCalls: 1",
                     self.telemetry.fps, self.telemetry.frame_time_ms
                 );
                 ui.label(RichText::new(telemetry_text).monospace().color(Color32::from_rgb(0, 220, 140)).size(12.0));
@@ -441,8 +441,8 @@ impl AppState {
                     .inner_margin(10.0)
                     .show(ui, |ui| {
                         ui.set_width(col_w);
-                        ui.label(RichText::new("⚖️ Preço Justo de Graham").strong().color(Color32::WHITE).size(14.0));
-                        ui.label(RichText::new("Fórmula: √(22.5 × LPA × VPA)").color(Color32::GRAY).size(11.0));
+                        ui.label(RichText::new("Preço Justo de Graham").strong().color(Color32::WHITE).size(14.0));
+                        ui.label(RichText::new("Fórmula: sqrt(22.5 * LPA * VPA)").color(Color32::GRAY).size(11.0));
                         ui.add_space(4.0);
                         ui.label(RichText::new(format!("R$ {:.2}", ind.graham_fair_value)).strong().color(Color32::from_rgb(0, 210, 160)).size(20.0));
                         let upside = if ind.price > 0.0 { ((ind.graham_fair_value - ind.price) / ind.price) * 100.0 } else { 0.0 };
@@ -456,7 +456,7 @@ impl AppState {
                     .inner_margin(10.0)
                     .show(ui, |ui| {
                         ui.set_width(col_w);
-                        ui.label(RichText::new("🎯 Preço Teto Bazin").strong().color(Color32::WHITE).size(14.0));
+                        ui.label(RichText::new("Preço Teto Bazin").strong().color(Color32::WHITE).size(14.0));
                         ui.horizontal(|ui| {
                             ui.label("Yield Alvo:");
                             ui.add(egui::Slider::new(&mut self.bazin_target_yield, 4.0..=12.0).suffix("%"));
@@ -473,7 +473,7 @@ impl AppState {
                     .inner_margin(10.0)
                     .show(ui, |ui| {
                         ui.set_width(col_w);
-                        ui.label(RichText::new("🛡️ Score Piotroski & Altman Z").strong().color(Color32::WHITE).size(14.0));
+                        ui.label(RichText::new("Score Piotroski & Altman Z").strong().color(Color32::WHITE).size(14.0));
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(format!("F-Score: {}/9", ind.piotroski_f_score)).strong().color(Color32::from_rgb(0, 220, 140)).size(16.0));
                             let status = if ind.piotroski_f_score >= 7 { "Forte / Saudável" } else { "Moderado" };
@@ -498,7 +498,7 @@ impl AppState {
                         .fill(Color32::from_rgb(24, 32, 44))
                         .inner_margin(12.0)
                         .show(ui, |ui| {
-                            ui.heading(RichText::new("🏢 Raio-X do Fundo Imobiliário (FII)").color(Color32::from_rgb(0, 210, 160)).size(16.0));
+                            ui.heading(RichText::new("Raio-X do Fundo Imobiliário (FII)").color(Color32::from_rgb(0, 210, 160)).size(16.0));
                             ui.horizontal(|ui| {
                                 ui.label(format!("Segmento: {}", fii.segment.display_name()));
                                 ui.separator();
@@ -513,7 +513,7 @@ impl AppState {
                             ui.add_space(6.0);
                             ui.label(RichText::new("Imóveis do Portfólio:").strong());
                             for p in &fii.properties {
-                                ui.label(format!("• {} - {}, {} (Área: {:.0} m², Vacância: {:.1}%)", p.name, p.city, p.state, p.area_m2, p.vacancy_percent));
+                                ui.label(format!("- {} - {}, {} (Área: {:.0} m2, Vacância: {:.1}%)", p.name, p.city, p.state, p.area_m2, p.vacancy_percent));
                             }
                         });
                     ui.add_space(10.0);
@@ -525,7 +525,7 @@ impl AppState {
                 .fill(Color32::from_rgb(22, 26, 36))
                 .inner_margin(12.0)
                 .show(ui, |ui| {
-                    ui.heading(RichText::new("📋 Matriz Completa de Indicadores Fundamentalistas").color(Color32::WHITE).size(16.0));
+                    ui.heading(RichText::new("Matriz Completa de Indicadores Fundamentalistas").color(Color32::WHITE).size(16.0));
                     ui.add_space(6.0);
 
                     ui.columns(4, |cols| {
@@ -579,12 +579,12 @@ impl AppState {
     fn render_gpu_terminal_view(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             // Chart controls
-            ui.label(RichText::new(format!("📈 Gráfico GPU: {}", self.selected_ticker)).strong());
+            ui.label(RichText::new(format!("Gráfico GPU: {}", self.selected_ticker)).strong());
             ui.separator();
             ui.label("Largura do Candle:");
             ui.add(egui::Slider::new(&mut self.chart_candle_width, 3.0..=20.0));
             ui.separator();
-            ui.checkbox(&mut self.is_live_sim_running, "🔴 Feed Real-Time (Ticks ao Vivo)");
+            ui.checkbox(&mut self.is_live_sim_running, "Feed Real-Time (Ticks ao Vivo)");
         });
 
         ui.add_space(4.0);
@@ -639,7 +639,7 @@ impl AppState {
 
             // Right 25%: Order Book & Times and Trades
             ui.vertical(|ui| {
-                ui.heading(RichText::new("📖 Livro de Ofertas (Level 2)").size(15.0));
+                ui.heading(RichText::new("Livro de Ofertas (Level 2)").size(15.0));
 
                 egui::Frame::group(ui.style())
                     .fill(Color32::from_rgb(20, 24, 32))
@@ -659,7 +659,7 @@ impl AppState {
                     });
 
                 ui.add_space(8.0);
-                ui.heading(RichText::new("⚡ Times & Trades (Últimos Ticks)").size(15.0));
+                ui.heading(RichText::new("Times & Trades (Últimos Ticks)").size(15.0));
 
                 egui::Frame::group(ui.style())
                     .fill(Color32::from_rgb(20, 24, 32))
@@ -689,7 +689,7 @@ impl AppState {
     // -------------------------------------------------------------
     fn render_heatmap_view(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.heading(RichText::new("🗺️ Mapa de Mercado B3 (Heatmap GPU)").color(Color32::WHITE).size(18.0));
+            ui.heading(RichText::new("Mapa de Mercado B3 (Heatmap GPU)").color(Color32::WHITE).size(18.0));
             ui.separator();
             ui.label(RichText::new("Verde = Alta | Vermelho = Baixa | Pulso Branco = Ticks em Tempo Real").color(Color32::GRAY));
         });
@@ -758,7 +758,7 @@ impl AppState {
     // -------------------------------------------------------------
     fn render_screener_view(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.heading(RichText::new("🔍 Screener Fundamentalista Multi-Fator").size(18.0));
+            ui.heading(RichText::new("Screener Fundamentalista Multi-Fator").size(18.0));
             ui.separator();
             ui.label(RichText::new(format!("Estratégia: {}", self.screener_preset_name)).strong().color(Color32::from_rgb(0, 210, 160)));
         });
@@ -767,19 +767,19 @@ impl AppState {
 
         // Preset Strategy Buttons
         ui.horizontal(|ui| {
-            if ui.button("🚀 Fórmula Mágica (Greenblatt)").clicked() {
+            if ui.button("Fórmula Mágica (Greenblatt)").clicked() {
                 self.screener_criteria = ScreenerCriteria::default();
                 self.screener_preset_name = "Fórmula Mágica (Greenblatt)".to_string();
             }
-            if ui.button("💰 Método Bazin (Preço Teto)").clicked() {
+            if ui.button("Método Bazin (Preço Teto)").clicked() {
                 self.screener_criteria = ScreenerEngine::bazin_preset();
                 self.screener_preset_name = "Método Décio Bazin (DY >= 6%)".to_string();
             }
-            if ui.button("🛡️ Graham Deep Value").clicked() {
+            if ui.button("Graham Deep Value").clicked() {
                 self.screener_criteria = ScreenerEngine::graham_preset();
-                self.screener_preset_name = "Benjamin Graham (P/L ≤ 15, P/VP ≤ 1.5)".to_string();
+                self.screener_preset_name = "Benjamin Graham (P/L <= 15, P/VP <= 1.5)".to_string();
             }
-            if ui.button("🔄 Limpar Filtros").clicked() {
+            if ui.button("Limpar Filtros").clicked() {
                 self.screener_criteria = ScreenerCriteria::default();
                 self.screener_preset_name = "Todos os Ativos".to_string();
             }
@@ -909,7 +909,7 @@ impl AppState {
             ui.add_space(10.0);
 
             // Open Positions Table
-            ui.heading(RichText::new("📊 Posições em Aberto").size(16.0));
+            ui.heading(RichText::new("Posições em Aberto").size(16.0));
             egui::Frame::group(ui.style())
                 .fill(Color32::from_rgb(24, 28, 38))
                 .inner_margin(8.0)
@@ -946,7 +946,7 @@ impl AppState {
             ui.add_space(12.0);
 
             // Monthly Tax & DARF (Code 6015) Engine
-            ui.heading(RichText::new("📑 Apuração Mensal de Imposto de Renda (DARF 6015)").color(Color32::from_rgb(0, 210, 160)).size(16.0));
+            ui.heading(RichText::new("Apuração Mensal de Imposto de Renda (DARF 6015)").color(Color32::from_rgb(0, 210, 160)).size(16.0));
             ui.label(RichText::new("Conforme normas da Receita Federal: Isenção de R$ 20.000/mês para Ações Swing Trade | Compensação de Prejuízos Acumulados").color(Color32::GRAY).size(11.0));
 
             ui.add_space(6.0);
@@ -960,9 +960,9 @@ impl AppState {
                             ui.heading(RichText::new(format!("Competência: {:02}/{}", report.month, report.year)).size(16.0).color(Color32::WHITE));
                             ui.separator();
                             let exempt_label = if report.is_acoes_exempt {
-                                RichText::new("✅ ISENTO (Vendas ≤ R$ 20.000)").color(Color32::from_rgb(0, 220, 140))
+                                RichText::new("ISENTO (Vendas <= R$ 20.000)").color(Color32::from_rgb(0, 220, 140))
                             } else {
-                                RichText::new("⚠️ TRIBUTÁVEL (Vendas > R$ 20.000)").color(Color32::from_rgb(255, 180, 80))
+                                RichText::new("TRIBUTÁVEL (Vendas > R$ 20.000)").color(Color32::from_rgb(255, 180, 80))
                             };
                             ui.label(exempt_label);
 
