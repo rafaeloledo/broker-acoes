@@ -65,6 +65,7 @@ async fn run(db: Arc<Database>, tx: crossbeam_channel::Sender<MarketEvent>) {
         let tickers = db.get_user_tickers().unwrap_or_default();
         if tickers != known_tickers {
             last_quote_ms = None;
+            last_news_ms = None;
             if tickers != cvm_attempted_for {
                 cvm_attempted_for.clear();
             }
