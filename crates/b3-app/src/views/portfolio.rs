@@ -1,9 +1,12 @@
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
+
+use crate::theme::Palette;
 
 use crate::AppState;
 
 impl AppState {
     pub(crate) fn render_portfolio_tax_view(&mut self, ui: &mut egui::Ui) {
+        let palette = Palette::from_ui(ui);
         let positions = self.portfolio_tracker.get_positions(&self.current_prices);
 
         let total_invested: f64 = positions.iter().map(|p| p.total_invested).sum();
@@ -14,27 +17,27 @@ impl AppState {
         egui::ScrollArea::vertical().show(ui, |ui| {
             // Portfolio Summary Banner
             egui::Frame::group(ui.style())
-                .fill(Color32::from_rgb(22, 26, 36))
+                .fill(palette.card)
                 .inner_margin(12.0)
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
-                            ui.label(RichText::new("Patrimônio em Custódia B3").color(Color32::GRAY).size(12.0));
-                            ui.heading(RichText::new(format!("R$ {:.2}", total_value)).size(26.0).color(Color32::WHITE));
+                            ui.label(RichText::new("Patrimônio em Custódia B3").color(palette.muted).size(12.0));
+                            ui.heading(RichText::new(format!("R$ {:.2}", total_value)).size(26.0).color(palette.text));
                         });
 
                         ui.separator();
 
                         ui.vertical(|ui| {
-                            ui.label(RichText::new("Total Aplicado (Preço Médio)").color(Color32::GRAY).size(12.0));
-                            ui.label(RichText::new(format!("R$ {:.2}", total_invested)).size(18.0).color(Color32::from_rgb(180, 195, 210)));
+                            ui.label(RichText::new("Total Aplicado (Preço Médio)").color(palette.muted).size(12.0));
+                            ui.label(RichText::new(format!("R$ {:.2}", total_invested)).size(18.0).color(palette.subtle));
                         });
 
                         ui.separator();
 
                         ui.vertical(|ui| {
-                            let col = if total_pnl >= 0.0 { Color32::from_rgb(0, 220, 140) } else { Color32::from_rgb(255, 80, 90) };
-                            ui.label(RichText::new("Lucro / Prejuízo Não Realizado").color(Color32::GRAY).size(12.0));
+                            let col = if total_pnl >= 0.0 { palette.positive } else { palette.negative };
+                            ui.label(RichText::new("Lucro / Prejuízo Não Realizado").color(palette.muted).size(12.0));
                             ui.label(RichText::new(format!("R$ {:+.2} ({:+.2}%)", total_pnl, total_pnl_pct)).strong().size(18.0).color(col));
                         });
                     });
@@ -45,7 +48,7 @@ impl AppState {
             // Open Positions Table
             ui.heading(RichText::new("Posições em Aberto").size(16.0));
             egui::Frame::group(ui.style())
-                .fill(Color32::from_rgb(24, 28, 38))
+                .fill(palette.card)
                 .inner_margin(8.0)
                 .show(ui, |ui| {
                     egui::Grid::new("portfolio_positions_grid")
@@ -63,8 +66,8 @@ impl AppState {
                             ui.end_row();
 
                             for p in &positions {
-                                let col = if p.unrealized_pnl >= 0.0 { Color32::from_rgb(0, 220, 140) } else { Color32::from_rgb(255, 80, 90) };
-                                ui.label(RichText::new(&p.symbol).strong().color(Color32::WHITE));
+                                let col = if p.unrealized_pnl >= 0.0 { palette.positive } else { palette.negative };
+                                ui.label(RichText::new(&p.symbol).strong().color(palette.text));
                                 ui.label(format!("{:.0}", p.quantity));
                                 ui.label(format!("R$ {:.2}", p.average_price));
                                 ui.label(format!("R$ {:.2}", p.current_price));
@@ -80,28 +83,28 @@ impl AppState {
             ui.add_space(12.0);
 
             // Monthly Tax & DARF (Code 6015) Engine
-            ui.heading(RichText::new("Apuração Mensal de Imposto de Renda (DARF 6015)").color(Color32::from_rgb(0, 210, 160)).size(16.0));
-            ui.label(RichText::new("Conforme normas da Receita Federal: Isenção de R$ 20.000/mês para Ações Swing Trade | Compensação de Prejuízos Acumulados").color(Color32::GRAY).size(11.0));
+            ui.heading(RichText::new("Apuração Mensal de Imposto de Renda (DARF 6015)").color(palette.accent).size(16.0));
+            ui.label(RichText::new("Conforme normas da Receita Federal: Isenção de R$ 20.000/mês para Ações Swing Trade | Compensação de Prejuízos Acumulados").color(palette.muted).size(11.0));
 
             ui.add_space(6.0);
 
             for report in &self.monthly_reports {
                 egui::Frame::group(ui.style())
-                    .fill(Color32::from_rgb(24, 30, 42))
+                    .fill(palette.card)
                     .inner_margin(10.0)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.heading(RichText::new(format!("Competência: {:02}/{}", report.month, report.year)).size(16.0).color(Color32::WHITE));
+                            ui.heading(RichText::new(format!("Competência: {:02}/{}", report.month, report.year)).size(16.0).color(palette.text));
                             ui.separator();
                             let exempt_label = if report.is_acoes_exempt {
-                                RichText::new("ISENTO (Vendas <= R$ 20.000)").color(Color32::from_rgb(0, 220, 140))
+                                RichText::new("ISENTO (Vendas <= R$ 20.000)").color(palette.positive)
                             } else {
-                                RichText::new("TRIBUTÁVEL (Vendas > R$ 20.000)").color(Color32::from_rgb(255, 180, 80))
+                                RichText::new("TRIBUTÁVEL (Vendas > R$ 20.000)").color(palette.warning)
                             };
                             ui.label(exempt_label);
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                let darf_col = if report.total_darf_due > 0.0 { Color32::from_rgb(255, 80, 90) } else { Color32::from_rgb(0, 220, 140) };
+                                let darf_col = if report.total_darf_due > 0.0 { palette.negative } else { palette.positive };
                                 ui.label(RichText::new(format!("DARF 6015: R$ {:.2}", report.total_darf_due)).strong().size(18.0).color(darf_col));
                             });
                         });
@@ -118,7 +121,7 @@ impl AppState {
                             cols[2].label(format!("Compensação Prejuízo: R$ {:.2}", report.loss_offset_acoes_swing));
                             cols[2].label(format!("IRRF Retido na Fonte: R$ {:.2}", report.irrf_deducted));
 
-                            cols[3].label(RichText::new(format!("Vencimento: {}", report.due_date.format("%d/%m/%Y"))).color(Color32::from_rgb(100, 180, 255)));
+                            cols[3].label(RichText::new(format!("Vencimento: {}", report.due_date.format("%d/%m/%Y"))).color(palette.link));
                             cols[3].label(format!("Prejuízo Carregado: R$ {:.2}", report.carryover_loss_acoes_swing));
                         });
                     });

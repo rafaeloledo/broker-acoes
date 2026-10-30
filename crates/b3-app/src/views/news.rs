@@ -1,4 +1,6 @@
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
+
+use crate::theme::Palette;
 
 use b3_core::news::NewsItem;
 use chrono::{DateTime, Utc};
@@ -7,6 +9,7 @@ use crate::AppState;
 
 impl AppState {
     pub(crate) fn render_news_view(&mut self, ui: &mut egui::Ui) {
+        let palette = Palette::from_ui(ui);
         if self.news_ticker.is_empty() {
             self.news_ticker = self
                 .visible_tickers
@@ -17,7 +20,7 @@ impl AppState {
         self.reload_news_rows();
 
         ui.heading(RichText::new("Notícias").size(18.0));
-        ui.label(RichText::new("Fatos relevantes da CVM e itens do RSS que citam o ativo.").color(Color32::GRAY));
+        ui.label(RichText::new("Fatos relevantes da CVM e itens do RSS que citam o ativo.").color(palette.muted));
         ui.add_space(6.0);
 
         ui.horizontal_wrapped(|ui| {
@@ -40,7 +43,7 @@ impl AppState {
         ui.add_space(8.0);
 
         if self.news_rows.is_empty() {
-            ui.label(RichText::new(self.empty_news_message()).color(Color32::GRAY));
+            ui.label(RichText::new(self.empty_news_message()).color(palette.muted));
             return;
         }
 
@@ -53,6 +56,7 @@ impl AppState {
     }
 
     pub(crate) fn render_decision_news(&mut self, ui: &mut egui::Ui, sym: &str) {
+        let palette = Palette::from_ui(ui);
         if self.decision_news_ticker != sym || self.decision_news_generation != self.news_generation {
             self.decision_news = self.db.search_news(Some(sym), None, None, None, 5).unwrap_or_default();
             self.decision_news_ticker = sym.to_string();
@@ -69,7 +73,7 @@ impl AppState {
             }
         });
         if self.decision_news.is_empty() {
-            ui.label(RichText::new(self.empty_news_message()).color(Color32::GRAY).size(12.0));
+            ui.label(RichText::new(self.empty_news_message()).color(palette.muted).size(12.0));
             return;
         }
         let rows = self.decision_news.clone();
@@ -108,14 +112,15 @@ impl AppState {
 }
 
 fn news_row(ui: &mut egui::Ui, item: &NewsItem) {
+    let palette = Palette::from_ui(ui);
     let response = egui::Frame::group(ui.style())
-        .fill(Color32::from_rgb(22, 26, 36))
+        .fill(palette.card)
         .inner_margin(8.0)
         .show(ui, |ui| {
-            ui.label(RichText::new(&item.title).strong().color(Color32::WHITE));
+            ui.label(RichText::new(&item.title).strong().color(palette.text));
             ui.label(
                 RichText::new(format!("{} · {} · {}", item.source, item.ticker, format_brt(item.published_at_ms)))
-                    .color(Color32::GRAY)
+                    .color(palette.muted)
                     .size(12.0),
             );
         })

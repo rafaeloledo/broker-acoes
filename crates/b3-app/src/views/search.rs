@@ -1,4 +1,6 @@
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
+
+use crate::theme::Palette;
 use b3_core::ticker::AssetClass;
 
 use crate::{AppState, MAX_VISIBLE_ASSETS};
@@ -19,12 +21,13 @@ impl AppState {
             .default_size([650.0, 480.0])
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
+                let palette = Palette::from_ui(ui);
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Pesquisa no Universo B3").strong().size(16.0).color(Color32::WHITE));
+                    ui.label(RichText::new("Pesquisa no Universo B3").strong().size(16.0).color(palette.text));
                     if let Some(slot) = self.search_target_slot {
-                        ui.label(RichText::new(format!("(Alterando Slot {})", slot + 1)).color(Color32::from_rgb(0, 210, 160)));
+                        ui.label(RichText::new(format!("(Alterando Slot {})", slot + 1)).color(palette.accent));
                     } else {
-                        ui.label(RichText::new(format!("(Adicionando ativo {}/{})", self.visible_tickers.len() + 1, MAX_VISIBLE_ASSETS)).color(Color32::from_rgb(0, 210, 160)));
+                        ui.label(RichText::new(format!("(Adicionando ativo {}/{})", self.visible_tickers.len() + 1, MAX_VISIBLE_ASSETS)).color(palette.accent));
                     }
                 });
 
@@ -65,7 +68,7 @@ impl AppState {
                 ui.separator();
 
                 let results = b3_core::b3_assets::search_b3_assets(&self.b3_search_query, self.b3_filter_class);
-                ui.label(RichText::new(format!("Encontrados {} ativos na B3", results.len())).color(Color32::GRAY).size(12.0));
+                ui.label(RichText::new(format!("Encontrados {} ativos na B3", results.len())).color(palette.muted).size(12.0));
 
                 ui.add_space(4.0);
 
@@ -84,9 +87,9 @@ impl AppState {
                             ui.end_row();
 
                             for asset in results.iter().take(60) {
-                                ui.label(RichText::new(asset.ticker).strong().color(Color32::from_rgb(0, 210, 160)));
+                                ui.label(RichText::new(asset.ticker).strong().color(palette.accent));
                                 ui.label(asset.name);
-                                ui.label(RichText::new(asset.sector).color(Color32::GRAY));
+                                ui.label(RichText::new(asset.sector).color(palette.muted));
                                 let class_str = match asset.asset_class {
                                     AssetClass::Acao => "Ação",
                                     AssetClass::Fii => "FII",

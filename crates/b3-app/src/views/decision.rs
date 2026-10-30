@@ -1,17 +1,19 @@
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 
+use crate::theme::Palette;
 use crate::AppState;
 use crate::presentation::{change_percent, format_metric, fundamentals_caption, price_caption, MetricId};
 
 impl AppState {
     pub(crate) fn render_decision_view(&mut self, ui: &mut egui::Ui) {
+        let palette = Palette::from_ui(ui);
         let Some(sym) = self
             .visible_tickers
             .get(self.focused_ticker_idx)
             .cloned()
             .or_else(|| self.visible_tickers.first().cloned())
         else {
-            ui.label(RichText::new("Nenhum ativo na watchlist.").color(Color32::GRAY));
+            ui.label(RichText::new("Nenhum ativo na watchlist.").color(palette.muted));
             return;
         };
 
@@ -30,10 +32,10 @@ impl AppState {
         };
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.label(RichText::new("Decisão").color(Color32::GRAY).size(12.0));
-            ui.heading(RichText::new(&sym).strong().size(28.0).color(Color32::WHITE));
+            ui.label(RichText::new("Decisão").color(palette.muted).size(12.0));
+            ui.heading(RichText::new(&sym).strong().size(28.0).color(palette.text));
             if !profile_name.is_empty() {
-                ui.label(RichText::new(profile_name).color(Color32::from_rgb(180, 195, 210)).size(14.0));
+                ui.label(RichText::new(profile_name).color(palette.subtle).size(14.0));
             }
             ui.add_space(6.0);
 
@@ -43,31 +45,31 @@ impl AppState {
                 } else {
                     "indisponível".to_string()
                 };
-                ui.label(RichText::new(price_text).strong().size(26.0).color(Color32::from_rgb(0, 220, 140)));
-                ui.label(RichText::new(price_caption(self.market_as_of.get(&sym).copied())).color(Color32::GRAY).size(13.0));
+                ui.label(RichText::new(price_text).strong().size(26.0).color(palette.positive));
+                ui.label(RichText::new(price_caption(self.market_as_of.get(&sym).copied())).color(palette.muted).size(13.0));
                 match change {
                     Some(value) => {
                         let color = if value >= 0.0 {
-                            Color32::from_rgb(0, 220, 140)
+                            palette.positive
                         } else {
-                            Color32::from_rgb(255, 80, 90)
+                            palette.negative
                         };
                         ui.label(RichText::new(format!("{value:+.2}% vs candle anterior")).color(color).size(13.0));
                     }
                     None => {
-                        ui.label(RichText::new("variação indisponível").color(Color32::GRAY).size(13.0));
+                        ui.label(RichText::new("variação indisponível").color(palette.muted).size(13.0));
                     }
                 }
             });
 
             ui.label(
                 RichText::new(fundamentals_caption(self.cvm_year.get(&sym).copied()))
-                    .color(Color32::GRAY)
+                    .color(palette.muted)
                     .size(12.0),
             );
             ui.label(
                 RichText::new("Preço de mercado quando a coleta existe. Livro, tape e o pulso do mapa são simulação.")
-                    .color(Color32::GRAY)
+                    .color(palette.muted)
                     .size(12.0),
             );
 
@@ -87,12 +89,12 @@ impl AppState {
                 for (label, metric) in cards {
                     let value = self.decision_metric(&sym, metric);
                     egui::Frame::group(ui.style())
-                        .fill(Color32::from_rgb(26, 30, 42))
+                        .fill(palette.card_alt)
                         .inner_margin(10.0)
                         .show(ui, |ui| {
                             ui.set_min_width(card_w.max(80.0));
-                            ui.label(RichText::new(label).color(Color32::from_rgb(140, 155, 175)).size(12.0));
-                            ui.label(RichText::new(value).strong().color(Color32::WHITE).size(18.0));
+                            ui.label(RichText::new(label).color(palette.label).size(12.0));
+                            ui.label(RichText::new(value).strong().color(palette.text).size(18.0));
                         });
                 }
             });

@@ -1,4 +1,6 @@
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
+
+use crate::theme::Palette;
 use b3_analytics::{ScreenerCriteria, ScreenerEngine};
 use b3_core::indicators::StockIndicators;
 
@@ -6,11 +8,12 @@ use crate::{ActiveView, AppState};
 
 impl AppState {
     pub(crate) fn render_screener_view(&mut self, ui: &mut egui::Ui) {
+        let palette = Palette::from_ui(ui);
         ui.horizontal(|ui| {
             ui.heading(RichText::new("Busca de ativos").size(18.0));
-            ui.label(RichText::new("Fora de P/L, P/VP, DY, Graham e Bazin, os números desta tela são cenário local.").color(Color32::GRAY));
+            ui.label(RichText::new("Fora de P/L, P/VP, DY, Graham e Bazin, os números desta tela são cenário local.").color(palette.muted));
             ui.separator();
-            ui.label(RichText::new(format!("Estratégia: {}", self.screener_preset_name)).strong().color(Color32::from_rgb(0, 210, 160)));
+            ui.label(RichText::new(format!("Estratégia: {}", self.screener_preset_name)).strong().color(palette.accent));
         });
 
         ui.add_space(6.0);
@@ -39,7 +42,7 @@ impl AppState {
 
         // Filter sliders
         egui::Frame::group(ui.style())
-            .fill(Color32::from_rgb(22, 26, 36))
+            .fill(palette.card)
             .inner_margin(8.0)
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
@@ -95,9 +98,9 @@ impl AppState {
                     ui.end_row();
 
                     for item in filtered {
-                        ui.label(RichText::new(&item.symbol).strong().color(Color32::WHITE));
+                        ui.label(RichText::new(&item.symbol).strong().color(palette.text));
                         ui.label(format!("R$ {:.2}", item.price));
-                        ui.label(RichText::new(format!("{:.2}%", item.dividend_yield)).color(Color32::from_rgb(0, 210, 160)));
+                        ui.label(RichText::new(format!("{:.2}%", item.dividend_yield)).color(palette.accent));
                         ui.label(format!("{:.2}", item.pl));
                         ui.label(format!("{:.2}", item.pvp));
                         ui.label(if item.ev_ebitda > 0.0 { format!("{:.2}", item.ev_ebitda) } else { "-".to_string() });

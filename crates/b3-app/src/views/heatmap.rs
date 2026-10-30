@@ -1,4 +1,6 @@
 use eframe::egui::{self, Color32, RichText, Sense, Vec2};
+
+use crate::theme::Palette;
 use b3_gpu::egui_callback::GpuTreemapCallback;
 use b3_gpu::treemap::TreemapUniforms;
 
@@ -6,10 +8,11 @@ use crate::{ActiveView, AppState};
 
 impl AppState {
     pub(crate) fn render_heatmap_view(&mut self, ui: &mut egui::Ui) {
+        let palette = Palette::from_ui(ui);
         ui.horizontal(|ui| {
-            ui.heading(RichText::new("Mapa").color(Color32::WHITE).size(18.0));
+            ui.heading(RichText::new("Mapa").color(palette.text).size(18.0));
             ui.separator();
-            ui.label(RichText::new("Verde = Alta | Vermelho = Baixa | Pulso branco = simulação de ticks").color(Color32::GRAY));
+            ui.label(RichText::new("Verde = Alta | Vermelho = Baixa | Pulso branco = simulação de ticks").color(palette.muted));
         });
 
         ui.add_space(6.0);
