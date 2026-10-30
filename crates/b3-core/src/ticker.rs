@@ -158,12 +158,29 @@ impl CompanyProfile {
                 "Shoppings",
                 60_796_275,
             ),
-            _ => (
-                "Ativo B3",
-                MarketSector::Outros,
-                "Mercado à Vista",
-                100_000_000,
-            ),
+            _ => {
+                if let Some(asset) = crate::b3_assets::find_b3_asset(&sym) {
+                    (
+                        asset.name,
+                        match asset.asset_class {
+                            AssetClass::Fii => MarketSector::Imobiliario,
+                            AssetClass::Acao => MarketSector::Outros,
+                            AssetClass::Etf => MarketSector::Financeiro,
+                            AssetClass::Bdr => MarketSector::TecnologiaInformacao,
+                            _ => MarketSector::Outros,
+                        },
+                        asset.sector,
+                        500_000_000,
+                    )
+                } else {
+                    (
+                        "Ativo B3",
+                        MarketSector::Outros,
+                        "Mercado à Vista",
+                        100_000_000,
+                    )
+                }
+            }
         };
 
         Self {
@@ -179,7 +196,7 @@ impl CompanyProfile {
             preferred_shares: shares / 2,
             free_float_percent: 45.0,
             website: "https://ri.b3.com.br".to_string(),
-            description: format!("Empresa listada na B3 ({}) com alta liquidez e cobertura de analistas.", sym),
+            description: format!("Ativo listado na B3 ({}) - {}. Cobertura de análise fundamentalista e dados de mercado.", sym, name),
         }
     }
 }

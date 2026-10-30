@@ -1,3 +1,4 @@
+pub mod b3_assets;
 pub mod corporate_actions;
 pub mod financials;
 pub mod fii;
@@ -6,6 +7,7 @@ pub mod quote;
 pub mod tax;
 pub mod ticker;
 
+pub use b3_assets::*;
 pub use corporate_actions::*;
 pub use financials::*;
 pub use fii::*;
