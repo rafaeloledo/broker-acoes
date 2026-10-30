@@ -133,8 +133,13 @@ async fn sync_cvm(
     for ticker in tickers {
         if let Some(issuer) = issuer_for_ticker(ticker) {
             cnpjs.insert(issuer.cnpj_digits.to_string());
-            if let Some(year) = db.cvm_latest_year(ticker)? {
-                stored.insert(ticker.clone(), year);
+            if let Some((year, accounts)) = db.load_cvm_accounts(ticker)? {
+                let has_shares = accounts.iter().any(|(code, amount)| {
+                    code == b3_core::financials::cvm_codes::SHARES_TOTAL && *amount > 0.0
+                });
+                if has_shares {
+                    stored.insert(ticker.clone(), year);
+                }
             }
         }
     }
