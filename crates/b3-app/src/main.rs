@@ -14,13 +14,15 @@ use b3_portfolio::tax_calc::TaxCalculator;
 use b3_storage::Database;
 
 use chrono::Utc;
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+mod chrome;
 mod market_feed;
 mod presentation;
+mod theme;
 mod views;
 
 use market_feed::{MarketEvent, QuoteTick};
@@ -107,6 +109,8 @@ struct AppState {
     decision_news: Vec<b3_core::news::NewsItem>,
     decision_news_ticker: String,
     decision_news_generation: u64,
+    dark_theme: bool,
+    menu_open: bool,
 }
 
 impl AppState {
@@ -253,6 +257,12 @@ impl AppState {
         let market_rx = market_feed::spawn(db.clone());
         let news_ticker = selected_ticker.clone();
         let news_attempted_at = db.latest_news_attempt().ok().flatten();
+        let dark_theme = cc
+            .storage
+            .and_then(|storage| eframe::get_value(storage, "dark_theme"))
+            .unwrap_or(true);
+        cc.egui_ctx
+            .set_visuals(theme::Palette::from_dark(dark_theme).visuals());
 
         Self {
             active_view: ActiveView::Decision,
@@ -307,6 +317,8 @@ impl AppState {
             decision_news: Vec::new(),
             decision_news_ticker: String::new(),
             decision_news_generation: u64::MAX,
+            dark_theme,
+            menu_open: false,
         }
     }
 
@@ -547,114 +559,14 @@ impl eframe::App for AppState {
             for n in &mut self.heatmap_nodes {
                 n.flash_intensity = (n.flash_intensity * 0.88).max(0.0);
             }
-            ui.ctx().request_repaint(); // Request next frame for 120Hz smooth animations
+            ui.ctx().request_repaint();
         }
 
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("BROKER-AÇÕES").strong().color(Color32::from_rgb(0, 210, 160)).size(17.0));
-            ui.separator();
+        self.render_shell(ui);
+    }
 
-            let on_decision = self.active_view == ActiveView::Decision;
-            if ui.selectable_label(on_decision, RichText::new("Decisão").strong()).clicked() {
-                self.active_view = ActiveView::Decision;
-            }
-
-            let tools = [
-                (ActiveView::News, "Notícias"),
-                (ActiveView::GpuTerminal, "Terminal"),
-                (ActiveView::MarketHeatmap, "Mapa"),
-                (ActiveView::Screener, "Busca de ativos"),
-                (ActiveView::PortfolioTax, "Carteira"),
-                (ActiveView::StatusInvest, "Ficha"),
-            ];
-            ui.menu_button(RichText::new("Ferramentas").strong(), |ui| {
-                for (view, label) in tools {
-                    if ui.button(label).clicked() {
-                        self.active_view = view;
-                        ui.close();
-                    }
-                }
-            });
-
-            if !on_decision {
-                if ui.button("Voltar à Decisão").clicked() {
-                    self.active_view = ActiveView::Decision;
-                }
-            }
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if self.visible_tickers.len() < MAX_VISIBLE_ASSETS {
-                    if ui.button(RichText::new("+ Adicionar").strong().color(Color32::from_rgb(0, 210, 160))).clicked() {
-                        self.search_target_slot = None;
-                        self.b3_search_query.clear();
-                        self.is_search_open = true;
-                        self.just_opened_search = true;
-                    }
-                }
-
-                let mut slot_to_remove: Option<usize> = None;
-                let mut slot_to_change: Option<usize> = None;
-
-                for i in (0..self.visible_tickers.len()).rev() {
-                    let sym = self.visible_tickers[i].clone();
-                    let is_focused = self.focused_ticker_idx == i;
-                    let chip_color = if is_focused {
-                        Color32::from_rgb(0, 210, 160)
-                    } else {
-                        Color32::WHITE
-                    };
-
-                    if ui.button(RichText::new(&sym).strong().color(chip_color)).clicked() {
-                        self.focused_ticker_idx = i;
-                        self.news_ticker = sym.clone();
-                        self.selected_ticker = sym;
-                    }
-                    if ui.small_button("trocar").clicked() {
-                        slot_to_change = Some(i);
-                    }
-
-                    if self.visible_tickers.len() > 1 && ui.small_button("x").clicked() {
-                        slot_to_remove = Some(i);
-                    }
-                }
-
-                if let Some(r) = slot_to_remove {
-                    self.visible_tickers.remove(r);
-                    if self.focused_ticker_idx >= self.visible_tickers.len() {
-                        self.focused_ticker_idx = self.visible_tickers.len().saturating_sub(1);
-                    }
-                    if !self.visible_tickers.is_empty() {
-                        self.selected_ticker = self.visible_tickers[self.focused_ticker_idx].clone();
-                    }
-                    self.persist_visible_tickers();
-                }
-
-                if let Some(s) = slot_to_change {
-                    self.search_target_slot = Some(s);
-                    self.b3_search_query.clear();
-                    self.is_search_open = true;
-                    self.just_opened_search = true;
-                }
-
-                ui.label(RichText::new("Ativos").color(Color32::GRAY));
-            });
-        });
-
-        ui.separator();
-
-        // Render search modal if open
-        self.render_search_modal(ui.ctx());
-
-        // Main View Content
-        match self.active_view {
-            ActiveView::Decision => self.render_decision_view(ui),
-            ActiveView::News => self.render_news_view(ui),
-            ActiveView::StatusInvest => self.render_status_invest_view(ui),
-            ActiveView::GpuTerminal => self.render_gpu_terminal_view(ui),
-            ActiveView::MarketHeatmap => self.render_heatmap_view(ui),
-            ActiveView::Screener => self.render_screener_view(ui),
-            ActiveView::PortfolioTax => self.render_portfolio_tax_view(ui),
-        }
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, "dark_theme", &self.dark_theme);
     }
 }
 

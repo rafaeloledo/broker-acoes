@@ -1,4 +1,6 @@
-use eframe::egui::{self, Color32, RichText, Sense, Vec2};
+use eframe::egui::{self, RichText, Sense, Vec2};
+
+use crate::theme::Palette;
 use b3_core::quote::GpuCandle;
 use b3_gpu::candlestick::ChartUniforms;
 use b3_gpu::egui_callback::GpuChartCallback;
@@ -7,6 +9,7 @@ use crate::{AppState, MAX_VISIBLE_ASSETS};
 
 impl AppState {
     pub(crate) fn render_gpu_terminal_view(&mut self, ui: &mut egui::Ui) {
+        let palette = Palette::from_ui(ui);
         let count = self.visible_tickers.len();
 
         ui.horizontal(|ui| {
@@ -14,7 +17,7 @@ impl AppState {
             ui.label(
                 RichText::new(format!("{:.0} FPS ({:.1} ms)", self.telemetry.fps, self.telemetry.frame_time_ms))
                     .monospace()
-                    .color(Color32::from_rgb(0, 220, 140))
+                    .color(palette.positive)
                     .size(12.0),
             );
             ui.separator();
@@ -25,7 +28,7 @@ impl AppState {
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if count < MAX_VISIBLE_ASSETS {
-                    if ui.button(RichText::new("+ Adicionar Gráfico").strong().color(Color32::from_rgb(0, 210, 160))).clicked() {
+                    if ui.button(RichText::new("+ Adicionar Gráfico").strong().color(palette.accent)).clicked() {
                         self.search_target_slot = None;
                         self.b3_search_query.clear();
                         self.is_search_open = true;
@@ -70,12 +73,12 @@ impl AppState {
                                 ui.set_height(cell_h);
 
                                 egui::Frame::group(ui.style())
-                                    .fill(Color32::from_rgb(18, 22, 30))
+                                    .fill(palette.card_inset)
                                     .inner_margin(6.0)
                                     .show(ui, |ui| {
                                         ui.horizontal(|ui| {
-                                            ui.label(RichText::new(format!("{}: {}", idx + 1, sym)).strong().color(Color32::from_rgb(0, 210, 160)).size(15.0));
-                                            ui.label(RichText::new(format!("R$ {:.2}", price)).strong().color(Color32::WHITE).size(15.0));
+                                            ui.label(RichText::new(format!("{}: {}", idx + 1, sym)).strong().color(palette.accent).size(15.0));
+                                            ui.label(RichText::new(format!("R$ {:.2}", price)).strong().color(palette.text).size(15.0));
 
                                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                                 if ui.small_button("Trocar").clicked() {
@@ -151,6 +154,7 @@ impl AppState {
     }
 
     pub(crate) fn render_single_chart_terminal(&mut self, ui: &mut egui::Ui, sym: &str) {
+        let palette = Palette::from_ui(ui);
         ui.horizontal(|ui| {
             // Left 75%: GPU Candlestick Canvas
             let chart_w = ui.available_width() * 0.72;
@@ -204,16 +208,16 @@ impl AppState {
                 ui.heading(RichText::new("Livro de Ofertas (simulação)").size(15.0));
 
                 egui::Frame::group(ui.style())
-                    .fill(Color32::from_rgb(20, 24, 32))
+                    .fill(palette.card_inset)
                     .inner_margin(6.0)
                     .show(ui, |ui| {
                         ui.columns(2, |cols| {
-                            cols[0].label(RichText::new("COMPRA (Bids)").color(Color32::from_rgb(0, 220, 140)).size(11.0));
+                            cols[0].label(RichText::new("COMPRA (Bids)").color(palette.positive).size(11.0));
                             for b in &self.order_book.bids {
                                 cols[0].label(RichText::new(format!("{:.2} | {:.0}", b.price, b.quantity)).size(11.0));
                             }
 
-                            cols[1].label(RichText::new("VENDA (Asks)").color(Color32::from_rgb(255, 80, 90)).size(11.0));
+                            cols[1].label(RichText::new("VENDA (Asks)").color(palette.negative).size(11.0));
                             for a in &self.order_book.asks {
                                 cols[1].label(RichText::new(format!("{:.2} | {:.0}", a.price, a.quantity)).size(11.0));
                             }
@@ -224,15 +228,15 @@ impl AppState {
                 ui.heading(RichText::new("Times & Trades (simulação)").size(15.0));
 
                 egui::Frame::group(ui.style())
-                    .fill(Color32::from_rgb(20, 24, 32))
+                    .fill(palette.card_inset)
                     .inner_margin(6.0)
                     .show(ui, |ui| {
                         egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
                             for tick in &self.recent_ticks {
                                 let (col, aggressor) = if tick.is_buyer_aggressor {
-                                    (Color32::from_rgb(0, 220, 140), "C")
+                                    (palette.positive, "C")
                                 } else {
-                                    (Color32::from_rgb(255, 80, 90), "V")
+                                    (palette.negative, "V")
                                 };
                                 ui.label(
                                     RichText::new(format!("R$ {:.2} | {:.0} un | {} [C:{} V:{}]", tick.price, tick.quantity, aggressor, tick.buyer_broker, tick.seller_broker))
