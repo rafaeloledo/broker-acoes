@@ -41,3 +41,22 @@ cargo run --release -p b3-app
 ```bash
 cargo test --workspace
 ```
+
+## Persistence & Custom Watchlist
+
+Broker-Ações stores user watchlists, quotes, and portfolio trades in an embedded SQLite database (`broker.db` by default, or via `BROKER_DB_PATH`).
+
+You can customize the active stocks directly in the interface or via SQLite:
+
+```sql
+-- View current user watchlist:
+SELECT * FROM user_watchlist ORDER BY slot_index ASC;
+
+-- Define your own custom stocks:
+DELETE FROM user_watchlist;
+INSERT INTO user_watchlist (slot_index, ticker) VALUES
+  (0, 'BBAS3'),
+  (1, 'TAEE11'),
+  (2, 'XPML11'),
+  (3, 'B3SA3');
+```

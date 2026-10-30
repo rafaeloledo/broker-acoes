@@ -48,6 +48,7 @@ struct AppState {
 
     // Database & domain
     db: Arc<Database>,
+    db_path: String,
     stock_indicators: HashMap<String, StockIndicators>,
     company_profiles: HashMap<String, CompanyProfile>,
     fii_details: HashMap<String, FiiDetails>,
@@ -85,7 +86,11 @@ struct AppState {
 
 impl AppState {
     fn new(cc: &eframe::CreationContext) -> Self {
-        let db = Arc::new(Database::in_memory().expect("Failed to initialize database"));
+        let db_path = std::env::var("BROKER_DB_PATH").unwrap_or_else(|_| "broker.db".to_string());
+        let db = Arc::new(Database::open(&db_path).unwrap_or_else(|e| {
+            log::warn!("Failed to open SQLite database at '{}': {}. Falling back to in-memory database.", db_path, e);
+            Database::in_memory().expect("Failed to initialize database")
+        }));
 
         // Initialize GPU pipelines using the wgpu device from eframe
         let wgpu_render_state = cc.wgpu_render_state.as_ref().expect("wgpu is required");
@@ -95,10 +100,34 @@ impl AppState {
         let candlestick_pipe = Arc::new(Mutex::new(CandlestickPipeline::new(device, target_format)));
         let treemap_pipe = Arc::new(Mutex::new(TreemapPipeline::new(device, target_format)));
 
-        let tickers = vec![
-            "PETR4", "VALE3", "WEGE3", "ITUB4", "BBAS3",
-            "TAEE11", "EGIE3", "HGLG11", "KNCR11", "MXRF11", "XPML11", "BTLG11"
+        // Load user-defined visible tickers from SQLite database persistence
+        let mut user_tickers = db.get_user_tickers().unwrap_or_default();
+        if user_tickers.is_empty() {
+            let defaults = vec![
+                "PETR4".to_string(),
+                "VALE3".to_string(),
+                "WEGE3".to_string(),
+                "ITUB4".to_string(),
+            ];
+            if let Err(e) = db.set_user_tickers(&defaults) {
+                log::warn!("Failed to seed initial user tickers in database: {}", e);
+            }
+            user_tickers = defaults;
+        }
+
+        let visible_tickers: Vec<String> = user_tickers.into_iter().take(MAX_VISIBLE_ASSETS).collect();
+        let selected_ticker = visible_tickers.first().cloned().unwrap_or_else(|| "PETR4".to_string());
+
+        let mut tickers = vec![
+            "PETR4".to_string(), "VALE3".to_string(), "WEGE3".to_string(), "ITUB4".to_string(),
+            "BBAS3".to_string(), "TAEE11".to_string(), "EGIE3".to_string(), "HGLG11".to_string(),
+            "KNCR11".to_string(), "MXRF11".to_string(), "XPML11".to_string(), "BTLG11".to_string(),
         ];
+        for t in &visible_tickers {
+            if !tickers.contains(t) {
+                tickers.push(t.clone());
+            }
+        }
 
         let mut stock_indicators = HashMap::new();
         let mut company_profiles = HashMap::new();
@@ -108,44 +137,50 @@ impl AppState {
 
         for t in &tickers {
             let ind = StockIndicators::default_for(t);
-            current_prices.insert(t.to_string(), ind.price);
-            stock_indicators.insert(t.to_string(), ind);
-            company_profiles.insert(t.to_string(), CompanyProfile::default_for(t));
+            let base_price = ind.price;
+            current_prices.insert(t.clone(), base_price);
+            stock_indicators.insert(t.clone(), ind);
+            company_profiles.insert(t.clone(), CompanyProfile::default_for(t));
 
             if AssetClass::from_symbol(t) == AssetClass::Fii {
-                fii_details.insert(t.to_string(), FiiDetails::default_for(t));
+                fii_details.insert(t.clone(), FiiDetails::default_for(t));
             }
 
-            // Generate realistic historical daily candles for GPU rendering
-            let base_price = stock_indicators.get(*t).unwrap().price;
-            let mut sym_candles = Vec::new();
-            let mut p = base_price * 0.85;
-            let now = Utc::now().timestamp_millis();
-            for i in (0..180).rev() {
-                let day_ms = now - (i * 86_400_000);
-                let delta = ((i as f64 * 7.3).sin() * 0.035) * p;
-                let open = p;
-                let close = (p + delta).max(1.0);
-                let high = open.max(close) + (p * 0.015);
-                let low = (open.min(close) - (p * 0.012)).max(0.5);
-                let vol = 15_000_000.0 + ((i as f64 * 3.1).cos().abs() * 30_000_000.0);
-                p = close;
-                sym_candles.push(Candle {
-                    timestamp_ms: day_ms,
-                    open,
-                    high,
-                    low,
-                    close,
-                    volume: vol,
-                    trades: 1200,
-                    adjusted_close: close,
-                });
-            }
-            let _ = db.insert_quotes(t, &sym_candles);
-            candles.insert(t.to_string(), sym_candles);
+            // Load existing candles from database if available, otherwise generate
+            let existing_quotes = db.get_quotes(t, 180).unwrap_or_default();
+            let sym_candles = if !existing_quotes.is_empty() {
+                existing_quotes
+            } else {
+                let mut sym_candles = Vec::new();
+                let mut p = base_price * 0.85;
+                let now = Utc::now().timestamp_millis();
+                for i in (0..180).rev() {
+                    let day_ms = now - (i * 86_400_000);
+                    let delta = ((i as f64 * 7.3).sin() * 0.035) * p;
+                    let open = p;
+                    let close = (p + delta).max(1.0);
+                    let high = open.max(close) + (p * 0.015);
+                    let low = (open.min(close) - (p * 0.012)).max(0.5);
+                    let vol = 15_000_000.0 + ((i as f64 * 3.1).cos().abs() * 30_000_000.0);
+                    p = close;
+                    sym_candles.push(Candle {
+                        timestamp_ms: day_ms,
+                        open,
+                        high,
+                        low,
+                        close,
+                        volume: vol,
+                        trades: 1200,
+                        adjusted_close: close,
+                    });
+                }
+                let _ = db.insert_quotes(t, &sym_candles);
+                sym_candles
+            };
+            candles.insert(t.clone(), sym_candles);
         }
 
-        // Initialize realistic portfolio with SINACOR trades
+        // Initialize realistic portfolio with SINACOR trades (load from DB if present)
         let sample_note = r#"
             1-BOVESPA C VISTA PETR4 PETROBRAS PN 200 34,20 6.840,00 C
             1-BOVESPA C VISTA VALE3 VALE ON 100 56,50 5.650,00 C
@@ -154,7 +189,13 @@ impl AppState {
             1-BOVESPA C VISTA BBAS3 BANCO DO BRASIL 200 26,80 5.360,00 C
             1-BOVESPA V VISTA PETR4 PETROBRAS PN 50 37,10 1.855,00 D
         "#;
-        let trades = SinacorParser::parse_trade_lines(sample_note, "XP Investimentos");
+        let mut trades = db.get_all_trades().unwrap_or_default();
+        if trades.is_empty() {
+            trades = SinacorParser::parse_trade_lines(sample_note, "XP Investimentos");
+            for tr in &trades {
+                let _ = db.insert_trade(tr);
+            }
+        }
         let mut portfolio_tracker = PortfolioTracker::new();
         let mut tax_calc = TaxCalculator::new();
         let monthly_reports = tax_calc.compute_monthly_taxes(&trades, &mut portfolio_tracker);
@@ -162,8 +203,8 @@ impl AppState {
         // Precompute Treemap nodes for major B3 sectors
         let (heatmap_nodes, heatmap_tickers) = Self::layout_heatmap(&stock_indicators);
 
-        // Initialize Level 2 orderbook for PETR4
-        let base_p = 36.40;
+        // Initialize Level 2 orderbook for selected ticker
+        let base_p = current_prices.get(&selected_ticker).copied().unwrap_or(36.40);
         let mut bids = Vec::new();
         let mut asks = Vec::new();
         for i in 1..=8 {
@@ -179,7 +220,7 @@ impl AppState {
             });
         }
         let order_book = OrderBook {
-            symbol: "PETR4".to_string(),
+            symbol: selected_ticker.clone(),
             timestamp_ms: Utc::now().timestamp_millis(),
             bids,
             asks,
@@ -187,13 +228,8 @@ impl AppState {
 
         Self {
             active_view: ActiveView::StatusInvest,
-            selected_ticker: "PETR4".to_string(),
-            visible_tickers: vec![
-                "PETR4".to_string(),
-                "VALE3".to_string(),
-                "WEGE3".to_string(),
-                "ITUB4".to_string(),
-            ],
+            selected_ticker,
+            visible_tickers,
             focused_ticker_idx: 0,
             search_query: String::new(),
             is_search_open: false,
@@ -202,6 +238,7 @@ impl AppState {
             b3_filter_class: None,
             just_opened_search: false,
             db,
+            db_path,
             stock_indicators,
             company_profiles,
             fii_details,
@@ -228,6 +265,12 @@ impl AppState {
         }
     }
 
+    fn persist_visible_tickers(&self) {
+        if let Err(e) = self.db.set_user_tickers(&self.visible_tickers) {
+            log::error!("Failed to persist user tickers to SQLite database: {}", e);
+        }
+    }
+
     fn ensure_asset_loaded(&mut self, ticker: &str) {
         let sym = ticker.to_uppercase();
         if self.stock_indicators.contains_key(&sym) {
@@ -235,7 +278,8 @@ impl AppState {
         }
 
         let ind = StockIndicators::default_for(&sym);
-        self.current_prices.insert(sym.clone(), ind.price);
+        let base_price = ind.price;
+        self.current_prices.insert(sym.clone(), base_price);
         self.stock_indicators.insert(sym.clone(), ind);
         self.company_profiles.insert(sym.clone(), CompanyProfile::default_for(&sym));
 
@@ -243,31 +287,36 @@ impl AppState {
             self.fii_details.insert(sym.clone(), FiiDetails::default_for(&sym));
         }
 
-        let base_price = self.stock_indicators.get(&sym).unwrap().price;
-        let mut sym_candles = Vec::new();
-        let mut p = base_price * 0.85;
-        let now = Utc::now().timestamp_millis();
-        for i in (0..180).rev() {
-            let day_ms = now - (i * 86_400_000);
-            let delta = ((i as f64 * 7.3).sin() * 0.035) * p;
-            let open = p;
-            let close = (p + delta).max(1.0);
-            let high = open.max(close) + (p * 0.015);
-            let low = (open.min(close) - (p * 0.012)).max(0.5);
-            let vol = 15_000_000.0 + ((i as f64 * 3.1).cos().abs() * 30_000_000.0);
-            p = close;
-            sym_candles.push(Candle {
-                timestamp_ms: day_ms,
-                open,
-                high,
-                low,
-                close,
-                volume: vol,
-                trades: 1200,
-                adjusted_close: close,
-            });
-        }
-        let _ = self.db.insert_quotes(&sym, &sym_candles);
+        let existing_quotes = self.db.get_quotes(&sym, 180).unwrap_or_default();
+        let sym_candles = if !existing_quotes.is_empty() {
+            existing_quotes
+        } else {
+            let mut sym_candles = Vec::new();
+            let mut p = base_price * 0.85;
+            let now = Utc::now().timestamp_millis();
+            for i in (0..180).rev() {
+                let day_ms = now - (i * 86_400_000);
+                let delta = ((i as f64 * 7.3).sin() * 0.035) * p;
+                let open = p;
+                let close = (p + delta).max(1.0);
+                let high = open.max(close) + (p * 0.015);
+                let low = (open.min(close) - (p * 0.012)).max(0.5);
+                let vol = 15_000_000.0 + ((i as f64 * 3.1).cos().abs() * 30_000_000.0);
+                p = close;
+                sym_candles.push(Candle {
+                    timestamp_ms: day_ms,
+                    open,
+                    high,
+                    low,
+                    close,
+                    volume: vol,
+                    trades: 1200,
+                    adjusted_close: close,
+                });
+            }
+            let _ = self.db.insert_quotes(&sym, &sym_candles);
+            sym_candles
+        };
         self.candles.insert(sym.clone(), sym_candles);
     }
 
@@ -293,6 +342,7 @@ impl AppState {
                 self.focused_ticker_idx = pos;
             }
         }
+        self.persist_visible_tickers();
     }
 
     fn layout_heatmap(_indicators: &HashMap<String, StockIndicators>) -> (Vec<GpuTreemapNode>, Vec<String>) {
@@ -402,6 +452,7 @@ impl eframe::App for AppState {
         ui.horizontal(|ui| {
             ui.label(RichText::new("BROKER-AÇÕES").strong().color(Color32::from_rgb(0, 210, 160)).size(17.0));
             ui.label(RichText::new("| B3 HARDWARE TERMINAL").color(Color32::from_rgb(160, 175, 190)).size(13.0));
+            ui.label(RichText::new(format!("| DB: {}", self.db_path)).color(Color32::from_rgb(100, 140, 160)).size(12.0));
 
             ui.separator();
 
@@ -476,6 +527,7 @@ impl eframe::App for AppState {
                     if !self.visible_tickers.is_empty() {
                         self.selected_ticker = self.visible_tickers[self.focused_ticker_idx].clone();
                     }
+                    self.persist_visible_tickers();
                 }
 
                 if let Some(s) = slot_to_change {
@@ -786,6 +838,7 @@ impl AppState {
                 self.visible_tickers = vec![t.clone()];
                 self.selected_ticker = t;
                 self.focused_ticker_idx = 0;
+                self.persist_visible_tickers();
             }
 
             if let Some(s) = slot_to_change {
@@ -803,6 +856,7 @@ impl AppState {
                 if !self.visible_tickers.is_empty() {
                     self.selected_ticker = self.visible_tickers[self.focused_ticker_idx].clone();
                 }
+                self.persist_visible_tickers();
             }
 
             ui.add_space(12.0);
@@ -1206,6 +1260,7 @@ impl AppState {
                 self.visible_tickers = vec![t.clone()];
                 self.selected_ticker = t;
                 self.focused_ticker_idx = 0;
+                self.persist_visible_tickers();
             }
 
             if let Some(s) = slot_to_change {
@@ -1643,4 +1698,45 @@ fn main() -> eframe::Result {
         native_options,
         Box::new(|cc| Ok(Box::new(AppState::new(cc)))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_user_persistence_default_and_custom() {
+        let db = Database::in_memory().unwrap();
+
+        // Initial state is empty
+        let initial = db.get_user_tickers().unwrap();
+        assert!(initial.is_empty());
+
+        // Seeding defaults when empty
+        let defaults = vec![
+            "PETR4".to_string(),
+            "VALE3".to_string(),
+            "WEGE3".to_string(),
+            "ITUB4".to_string(),
+        ];
+        db.set_user_tickers(&defaults).unwrap();
+        assert_eq!(db.get_user_tickers().unwrap(), defaults);
+
+        // User customizes their own stocks (user-defined persistence)
+        let custom_tickers = vec![
+            "BBAS3".to_string(),
+            "TAEE11".to_string(),
+            "HGLG11".to_string(),
+            "XPML11".to_string(),
+        ];
+        db.set_user_tickers(&custom_tickers).unwrap();
+        let loaded = db.get_user_tickers().unwrap();
+        assert_eq!(loaded, custom_tickers);
+
+        // Respects MAX_VISIBLE_ASSETS limit when taking
+        let visible: Vec<String> = loaded.into_iter().take(MAX_VISIBLE_ASSETS).collect();
+        assert_eq!(visible.len(), 4);
+        assert_eq!(visible[0], "BBAS3");
+        assert_eq!(visible[3], "XPML11");
+    }
 }

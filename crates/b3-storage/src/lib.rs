@@ -67,6 +67,11 @@ impl Database {
             );
 
             CREATE INDEX IF NOT EXISTS idx_trades_date ON trades(date);
+
+            CREATE TABLE IF NOT EXISTS user_watchlist (
+                slot_index INTEGER PRIMARY KEY,
+                ticker TEXT NOT NULL
+            );
             "#,
         )?;
         Ok(())
@@ -189,6 +194,59 @@ impl Database {
         }
         Ok(trades)
     }
+
+    pub fn get_user_tickers(&self) -> anyhow::Result<Vec<String>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare("SELECT ticker FROM user_watchlist ORDER BY slot_index ASC")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let mut tickers = Vec::new();
+        for r in rows {
+            let t = r?.trim().to_uppercase();
+            if !t.is_empty() && !tickers.contains(&t) {
+                tickers.push(t);
+            }
+        }
+        Ok(tickers)
+    }
+
+    pub fn set_user_tickers<T: AsRef<str>>(&self, tickers: &[T]) -> anyhow::Result<()> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        {
+            tx.execute("DELETE FROM user_watchlist", [])?;
+            let mut stmt = tx.prepare_cached(
+                "INSERT INTO user_watchlist (slot_index, ticker) VALUES (?1, ?2)",
+            )?;
+            for (idx, ticker) in tickers.iter().enumerate() {
+                let sym = ticker.as_ref().trim().to_uppercase();
+                if !sym.is_empty() {
+                    stmt.execute(params![idx as i64, sym])?;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn add_user_ticker(&self, ticker: &str) -> anyhow::Result<()> {
+        let mut tickers = self.get_user_tickers()?;
+        let sym = ticker.trim().to_uppercase();
+        if !sym.is_empty() && !tickers.contains(&sym) {
+            tickers.push(sym);
+            self.set_user_tickers(&tickers)?;
+        }
+        Ok(())
+    }
+
+    pub fn remove_user_ticker(&self, ticker: &str) -> anyhow::Result<()> {
+        let mut tickers = self.get_user_tickers()?;
+        let sym = ticker.trim().to_uppercase();
+        if let Some(pos) = tickers.iter().position(|t| t == &sym) {
+            tickers.remove(pos);
+            self.set_user_tickers(&tickers)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -226,5 +284,55 @@ mod tests {
         assert_eq!(fetched.len(), 2);
         assert_eq!(fetched[0].open, 10.0);
         assert_eq!(fetched[1].close, 11.5);
+    }
+
+    #[test]
+    fn test_user_watchlist_persistence() {
+        let db = Database::in_memory().unwrap();
+        assert!(db.get_user_tickers().unwrap().is_empty());
+
+        let initial = vec!["PETR4", "VALE3", "WEGE3", "ITUB4"];
+        db.set_user_tickers(&initial).unwrap();
+
+        let loaded = db.get_user_tickers().unwrap();
+        assert_eq!(loaded, vec!["PETR4", "VALE3", "WEGE3", "ITUB4"]);
+
+        // Add ticker
+        db.add_user_ticker("BBAS3").unwrap();
+        let loaded2 = db.get_user_tickers().unwrap();
+        assert_eq!(loaded2, vec!["PETR4", "VALE3", "WEGE3", "ITUB4", "BBAS3"]);
+
+        // Remove ticker
+        db.remove_user_ticker("VALE3").unwrap();
+        let loaded3 = db.get_user_tickers().unwrap();
+        assert_eq!(loaded3, vec!["PETR4", "WEGE3", "ITUB4", "BBAS3"]);
+
+        // Replace all tickers with user-defined set
+        let user_defined = vec!["TAEE11", "EGIE3", "HGLG11", "XPML11"];
+        db.set_user_tickers(&user_defined).unwrap();
+        assert_eq!(db.get_user_tickers().unwrap(), user_defined);
+    }
+
+    #[test]
+    fn test_user_watchlist_file_persistence() {
+        let temp_dir = std::env::temp_dir();
+        let db_path = temp_dir.join(format!("test_broker_{}.db", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+
+        // Step 1: Open file database and save custom user tickers
+        {
+            let db = Database::open(&db_path).unwrap();
+            let custom_tickers = vec!["BBAS3", "TAEE11", "XPML11", "MXRF11"];
+            db.set_user_tickers(&custom_tickers).unwrap();
+        }
+
+        // Step 2: Reopen the database from file and verify they persist
+        {
+            let db = Database::open(&db_path).unwrap();
+            let loaded = db.get_user_tickers().unwrap();
+            assert_eq!(loaded, vec!["BBAS3", "TAEE11", "XPML11", "MXRF11"]);
+        }
+
+        // Cleanup
+        let _ = std::fs::remove_file(db_path);
     }
 }
