@@ -60,6 +60,47 @@ fn scale_amount(amount: f64, escala: &str) -> f64 {
     }
 }
 
+fn fold_label(raw: &str) -> String {
+    raw.chars()
+        .filter_map(|ch| {
+            Some(match ch {
+                'Á' | 'À' | 'Â' | 'Ã' | 'á' | 'à' | 'â' | 'ã' => 'A',
+                'É' | 'Ê' | 'é' | 'ê' => 'E',
+                'Í' | 'í' => 'I',
+                'Ó' | 'Ô' | 'Õ' | 'ó' | 'ô' | 'õ' => 'O',
+                'Ú' | 'ú' => 'U',
+                'Ç' | 'ç' => 'C',
+                other if other.is_ascii() => other.to_ascii_uppercase(),
+                _ => return None,
+            })
+        })
+        .collect()
+}
+
+fn is_equity_label(folded: &str) -> bool {
+    folded.contains("PATRIM") && folded.contains("LIQUID")
+}
+
+fn is_dividend_paid_label(folded: &str) -> bool {
+    let dividend = folded.contains("DIVIDEND") || folded.contains("JUROS SOBRE") || folded.contains("JCP");
+    let paid = folded.contains("PAG") || folded.contains("PGTO");
+    let received = folded.contains("RECEB");
+    dividend && paid && !received
+}
+
+/// Vale e Itaú publicam a composição em milhares; Petrobras, Banco do Brasil e WEG em unidades.
+fn shares_in_units(raw: f64) -> f64 {
+    if raw > 0.0 && raw < 100_000_000.0 {
+        raw * 1000.0
+    } else {
+        raw
+    }
+}
+
+fn column_index_any(headers: &csv::StringRecord, names: &[&str]) -> Option<usize> {
+    names.iter().find_map(|name| column_index(headers, name))
+}
+
 pub fn filter_statement_csv(content: &str, cnpjs: &HashSet<String>) -> Vec<KeptAccount> {
     let allowed = statement_codes();
     let mut reader = csv::ReaderBuilder::new()
@@ -83,17 +124,30 @@ pub fn filter_statement_csv(content: &str, cnpjs: &HashSet<String>) -> Vec<KeptA
     let escala_idx = column_index(&headers, "ESCALA_MOEDA");
     let end_idx = column_index(&headers, "DT_FIM_EXERC");
     let refer_idx = column_index(&headers, "DT_REFER");
+    let desc_idx = column_index(&headers, "DS_CONTA");
 
-    let mut kept = Vec::new();
+    let mut kept: Vec<KeptAccount> = Vec::new();
+    let mut equity_depth: HashMap<(String, i32), usize> = HashMap::new();
     for record in reader.records().flatten() {
         let cnpj = cnpj_digits(record.get(cnpj_idx).unwrap_or(""));
         if !cnpjs.contains(&cnpj) {
             continue;
         }
         let code = record.get(account_idx).unwrap_or("").trim();
-        if !allowed.contains(code) {
+        let folded = fold_label(desc_idx.and_then(|idx| record.get(idx)).unwrap_or(""));
+        let canonical = if is_equity_label(&folded) {
+            cvm_codes::PATRIMONIO_LIQUIDO.to_string()
+        } else if is_dividend_paid_label(&folded) {
+            cvm_codes::DIVIDENDOS_PAGOS.to_string()
+        } else if allowed.contains(code)
+            && code != cvm_codes::PATRIMONIO_LIQUIDO
+            && code != cvm_codes::DIVIDENDOS_PAGOS
+            && code != cvm_codes::DIVIDENDOS_PAGOS_ALT
+        {
+            code.to_string()
+        } else {
             continue;
-        }
+        };
         if let Some(idx) = ordem_idx {
             if !is_latest_exerc(record.get(idx).unwrap_or("")) {
                 continue;
@@ -110,12 +164,39 @@ pub fn filter_statement_csv(content: &str, cnpjs: &HashSet<String>) -> Vec<KeptA
         let Some(reference_date) = NaiveDate::parse_from_str(date_raw.trim(), "%Y-%m-%d").ok() else {
             continue;
         };
+        let amount = scale_amount(amount, escala);
+        let year = reference_date.year();
+        if canonical == cvm_codes::PATRIMONIO_LIQUIDO {
+            let depth = code.matches('.').count();
+            let key = (cnpj.clone(), year);
+            if let Some(previous) = equity_depth.get(&key).copied() {
+                if depth >= previous {
+                    continue;
+                }
+                if let Some(existing) = kept.iter_mut().find(|row| {
+                    row.cnpj_digits == cnpj && row.year == year && row.account_code == canonical
+                }) {
+                    existing.amount = amount;
+                    existing.reference_date = reference_date;
+                }
+                equity_depth.insert(key, depth);
+                continue;
+            }
+            equity_depth.insert(key, depth);
+        } else if canonical == cvm_codes::DIVIDENDOS_PAGOS {
+            if let Some(existing) = kept.iter_mut().find(|row| {
+                row.cnpj_digits == cnpj && row.year == year && row.account_code == canonical
+            }) {
+                existing.amount += amount;
+                continue;
+            }
+        }
         kept.push(KeptAccount {
             cnpj_digits: cnpj,
-            year: reference_date.year(),
+            year,
             reference_date,
-            account_code: code.to_string(),
-            amount: scale_amount(amount, escala),
+            account_code: canonical,
+            amount,
         });
     }
     kept
@@ -133,9 +214,27 @@ pub fn filter_capital_csv(content: &str, cnpjs: &HashSet<String>) -> Vec<KeptAcc
     let Some(cnpj_idx) = column_index(&headers, "CNPJ_CIA") else {
         return Vec::new();
     };
-    let total_idx = column_index(&headers, "Quantidade_Total_Acoes_Capital_Integralizado");
-    let on_idx = column_index(&headers, "Quantidade_Acoes_Ordinarias_Capital_Integralizado");
-    let pn_idx = column_index(&headers, "Quantidade_Acoes_Preferenciais_Capital_Integralizado");
+    let total_idx = column_index_any(
+        &headers,
+        &[
+            "Quantidade_Total_Acoes_Capital_Integralizado",
+            "QT_ACAO_TOTAL_CAP_INTEGR",
+        ],
+    );
+    let on_idx = column_index_any(
+        &headers,
+        &[
+            "Quantidade_Acoes_Ordinarias_Capital_Integralizado",
+            "QT_ACAO_ORDIN_CAP_INTEGR",
+        ],
+    );
+    let pn_idx = column_index_any(
+        &headers,
+        &[
+            "Quantidade_Acoes_Preferenciais_Capital_Integralizado",
+            "QT_ACAO_PREF_CAP_INTEGR",
+        ],
+    );
     let refer_idx = column_index(&headers, "DT_REFER");
 
     let mut kept = Vec::new();
@@ -169,7 +268,7 @@ pub fn filter_capital_csv(content: &str, cnpjs: &HashSet<String>) -> Vec<KeptAcc
             year: reference_date.year(),
             reference_date,
             account_code: cvm_codes::SHARES_TOTAL.to_string(),
-            amount: shares,
+            amount: shares_in_units(shares),
         });
     }
     kept
@@ -314,5 +413,47 @@ CNPJ_CIA;DT_REFER;VERSAO;DENOM_CIA;CD_CVM;GRUPO_DFP;MOEDA;ESCALA_MOEDA;ORDEM_EXE
         let kept = filter_statement_csv(&text, &cnpjs);
         assert_eq!(kept.len(), 1);
         assert!((kept[0].amount - 10_000.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_bank_equity_and_dividends_ignore_lookalike_codes() {
+        let csv = "\
+CNPJ_CIA;DT_REFER;VERSAO;DENOM_CIA;CD_CVM;GRUPO_DFP;MOEDA;ESCALA_MOEDA;ORDEM_EXERC;DT_FIM_EXERC;CD_CONTA;DS_CONTA;VL_CONTA
+60.872.504/0001-23;2025-12-31;2;ITAU;19348;BPP;REAL;MIL;ÚLTIMO;2025-12-31;2.03;Passivos Financeiros ao Custo Amortizado;2350901000
+60.872.504/0001-23;2025-12-31;2;ITAU;19348;BPP;REAL;MIL;ÚLTIMO;2025-12-31;2.08;Patrimônio Líquido Consolidado;215076000
+60.872.504/0001-23;2025-12-31;2;ITAU;19348;DFC;REAL;MIL;ÚLTIMO;2025-12-31;6.03.05;Resultado da Entrega de Ações em Tesouraria;947000
+60.872.504/0001-23;2025-12-31;2;ITAU;19348;DFC;REAL;MIL;ÚLTIMO;2025-12-31;6.03.08;Dividendos / Juros sobre o Capital Próprio Pagos;-48299000
+60.872.504/0001-23;2025-12-31;2;ITAU;19348;DFC;REAL;MIL;ÚLTIMO;2025-12-31;6.03.07;Dividendos pagos a acionistas não controladores;-633000
+60.872.504/0001-23;2025-12-31;2;ITAU;19348;DRE;REAL;MIL;ÚLTIMO;2025-12-31;3.09;Lucro/Prejuízo Consolidado do Período;45849000
+";
+        let cnpjs = HashSet::from([cnpj_digits("60.872.504/0001-23")]);
+        let kept = filter_statement_csv(csv, &cnpjs);
+        let amount = |code: &str| kept.iter().find(|row| row.account_code == code).map(|row| row.amount);
+        assert!((amount("2.03").unwrap() - 215_076_000_000.0).abs() < 1.0);
+        assert!((amount("6.03.05").unwrap() - -48_932_000_000.0).abs() < 1.0);
+        assert!((amount("3.09").unwrap() - 45_849_000_000.0).abs() < 1.0);
+        assert_eq!(kept.len(), 3);
+    }
+
+    #[test]
+    fn test_capital_columns_scale_thousands_only_when_small() {
+        let csv = "\
+CNPJ_CIA;DT_REFER;VERSAO;DENOM_CIA;QT_ACAO_ORDIN_CAP_INTEGR;QT_ACAO_PREF_CAP_INTEGR;QT_ACAO_TOTAL_CAP_INTEGR
+60.872.504/0001-23;2025-12-31;2;ITAU;5617743;5409126;11026869
+33.000.167/0001-01;2025-12-31;1;PETROBRAS;7442231382;5446501379;12888732761
+";
+        let cnpjs = HashSet::from([
+            cnpj_digits("60.872.504/0001-23"),
+            cnpj_digits("33.000.167/0001-01"),
+        ]);
+        let kept = filter_capital_csv(csv, &cnpjs);
+        let shares = |cnpj: &str| {
+            kept.iter()
+                .find(|row| row.cnpj_digits == cnpj_digits(cnpj))
+                .map(|row| row.amount)
+                .unwrap()
+        };
+        assert!((shares("60.872.504/0001-23") - 11_026_869_000.0).abs() < 1.0);
+        assert!((shares("33.000.167/0001-01") - 12_888_732_761.0).abs() < 1.0);
     }
 }
