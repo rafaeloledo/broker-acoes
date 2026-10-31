@@ -73,7 +73,12 @@ async fn run(
     let mut last_news_ms: Option<i64> = None;
 
     loop {
-        let tickers = db.get_user_tickers().unwrap_or_default();
+        let mut tickers = db.get_user_tickers().unwrap_or_default();
+        for core in &["PETR4", "VALE3", "ITUB4", "BBAS3", "WEGE3", "BBSE3"] {
+            if !tickers.iter().any(|t| t == core) {
+                tickers.push(core.to_string());
+            }
+        }
         if tickers != known_tickers {
             last_quote_ms = None;
             last_news_ms = None;

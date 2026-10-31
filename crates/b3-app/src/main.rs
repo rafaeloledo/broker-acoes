@@ -236,7 +236,7 @@ impl AppState {
             1-BOVESPA C VISTA VALE3 VALE ON 100 56,50 5.650,00 C
             1-BOVESPA C VISTA WEGE3 WEG ON 150 48,00 7.200,00 C
             1-BOVESPA C VISTA HGLG11 CSHG LOGISTICA 50 151,00 7.550,00 C
-            1-BOVESPA C VISTA BBAS3 BANCO DO BRASIL 200 26,80 5.360,00 C
+            1-BOVESPA C VISTA BBAS3 BANCO DO BRASIL 200 16,47 3.294,00 C
             1-BOVESPA V VISTA PETR4 PETROBRAS PN 50 37,10 1.855,00 D
         "#;
         let mut trades = db.get_all_trades().unwrap_or_default();
