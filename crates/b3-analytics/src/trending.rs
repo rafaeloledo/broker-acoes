@@ -184,16 +184,32 @@ impl TrendingEngine {
         let mut prices: Vec<f64> = candles.iter().map(|c| c.close).collect();
         if prices.is_empty() {
             // Generate basic synthetic history around current price for robust calculations
-            for i in (0..60).rev() {
-                let factor = 1.0 + ((i as f64 * 0.15).sin() * 0.03);
-                prices.push(price * factor);
+            let mut current = price;
+            for i in 0..60 {
+                let pct = ((i as f64 + 1.0) * 0.15).sin() * 0.012;
+                let prev = current / (1.0 + pct);
+                prices.push(current);
+                current = prev;
             }
+            prices.reverse();
         }
         if let Some(last) = prices.last_mut() {
             *last = price;
         }
 
-        let previous_close = if prices.len() >= 2 {
+        let previous_close = if let Some(last_candle) = candles.last() {
+            if last_candle.open > 0.0
+                && (last_candle.open - price).abs() / last_candle.open < 0.20
+                && (last_candle.open - price).abs() > 1e-4
+            {
+                // In daily market quotes from Yahoo Finance / Brapi, candle.open stores chartPreviousClose
+                Some(last_candle.open)
+            } else if prices.len() >= 2 {
+                Some(prices[prices.len() - 2])
+            } else {
+                None
+            }
+        } else if prices.len() >= 2 {
             Some(prices[prices.len() - 2])
         } else {
             None
@@ -684,5 +700,32 @@ mod tests {
         assert!(!analysis.risk_factors.is_empty());
         assert!(analysis.graham_fair_value.is_some());
         assert!(analysis.bazin_ceiling_price.is_some());
+    }
+
+    #[test]
+    fn test_trending_engine_bbas3_variation() {
+        let ind = StockIndicators::default_for("BBAS3");
+        let market_candle = Candle {
+            timestamp_ms: 1793390000000,
+            open: 16.46,
+            high: 16.75,
+            low: 16.13,
+            close: 16.47,
+            volume: 61_000_000.0,
+            trades: 1,
+            adjusted_close: 16.47,
+        };
+        let analysis = TrendingEngine::analyze_stock(
+            "BBAS3",
+            "Banco do Brasil ON",
+            "Financeiro & Bancos",
+            16.47,
+            &[market_candle],
+            &ind,
+            None,
+        );
+        let change = analysis.price_change_pct.expect("should have change");
+        assert!(change.abs() < 1.0, "1d change should be ~0.06%, got {:+.2}%", change);
+        assert!((change - 0.0607).abs() < 0.01);
     }
 }

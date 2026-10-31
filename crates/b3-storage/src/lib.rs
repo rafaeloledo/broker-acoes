@@ -240,13 +240,13 @@ impl Database {
                 params![
                     symbol,
                     day_ms,
-                    candle.close,
-                    candle.high.max(candle.close),
-                    candle.low.min(candle.close),
+                    candle.open,
+                    candle.high.max(candle.close).max(candle.open),
+                    candle.low.min(candle.close).min(candle.open),
                     candle.close,
                     candle.volume,
                     candle.trades,
-                    candle.close,
+                    candle.adjusted_close,
                     fetched_at_ms,
                 ],
             )?;

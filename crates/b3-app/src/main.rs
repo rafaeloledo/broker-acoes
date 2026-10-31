@@ -637,17 +637,19 @@ fn copy_core_onto(ind: &mut StockIndicators, multiples: &CoreMultiples) {
 
 fn synthetic_candles(base_price: f64) -> Vec<Candle> {
     let mut candles = Vec::with_capacity(180);
-    let mut price = base_price * 0.85;
     let now = Utc::now().timestamp_millis();
-    for i in (0..180).rev() {
+    let mut current = base_price;
+
+    for i in 0..180 {
         let day_ms = now - (i * 86_400_000);
-        let delta = ((i as f64 * 7.3).sin() * 0.035) * price;
-        let open = price;
-        let close = (price + delta).max(1.0);
-        let high = open.max(close) + (price * 0.015);
-        let low = (open.min(close) - (price * 0.012)).max(0.5);
-        let volume = 15_000_000.0 + ((i as f64 * 3.1).cos().abs() * 30_000_000.0);
-        price = close;
+        let pct_change = ((i as f64 + 1.0) * 2.17).sin() * 0.012 + ((i as f64 + 1.0) * 0.43).cos() * 0.008;
+        let prev = current / (1.0 + pct_change);
+        let open = prev;
+        let close = current;
+        let high = open.max(close) + (current * 0.006);
+        let low = (open.min(close) - (current * 0.006)).max(0.1);
+        let volume = 15_000_000.0 + (((i as f64 * 3.1).cos().abs()) * 30_000_000.0);
+
         candles.push(Candle {
             timestamp_ms: day_ms,
             open,
@@ -658,7 +660,9 @@ fn synthetic_candles(base_price: f64) -> Vec<Candle> {
             trades: 1200,
             adjusted_close: close,
         });
+        current = prev;
     }
+    candles.reverse();
     candles
 }
 
