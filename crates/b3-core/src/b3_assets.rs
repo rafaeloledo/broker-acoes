@@ -114,6 +114,7 @@ pub static B3_ASSET_CATALOG: &[B3Asset] = &[
     B3Asset { ticker: "UNIP6", name: "Unipar Carbocloro PNB", sector: "Química & Cloro Soda", asset_class: AssetClass::Acao, base_price: 51.00 },
     B3Asset { ticker: "RECV3", name: "PetroRecôncavo ON", sector: "Petróleo Onshore", asset_class: AssetClass::Acao, base_price: 11.03 },
     B3Asset { ticker: "BRAV3", name: "Brava Energia ON", sector: "Petróleo & Exploração", asset_class: AssetClass::Acao, base_price: 18.42 },
+    B3Asset { ticker: "AZZA3", name: "Azzas 2154 ON (Arezzo & Grupo Soma - ex ARZZ3 / SOMA3)", sector: "Varejo de Moda & Calçados", asset_class: AssetClass::Acao, base_price: 14.33 },
     B3Asset { ticker: "VIVA3", name: "Vivara Joias ON", sector: "Joalheria & Luxo", asset_class: AssetClass::Acao, base_price: 17.30 },
     B3Asset { ticker: "GUAR3", name: "Riachuelo Guararapes ON", sector: "Varejo de Moda & Midway", asset_class: AssetClass::Acao, base_price: 7.40 },
     B3Asset { ticker: "CEAB3", name: "C&A Modas ON", sector: "Varejo de Moda", asset_class: AssetClass::Acao, base_price: 6.55 },
@@ -265,12 +266,27 @@ pub fn search_b3_assets(query: &str, filter_class: Option<AssetClass>) -> Vec<&'
         }
     }
 
+    if results.is_empty() {
+        if let Some(asset) = find_b3_asset(&q) {
+            if filter_class.map_or(true, |fc| asset.asset_class == fc) {
+                results.push(asset);
+            }
+        }
+    }
+
     results
 }
 
 pub fn find_b3_asset(ticker: &str) -> Option<&'static B3Asset> {
     let t = ticker.trim().to_uppercase();
-    B3_ASSET_CATALOG.iter().find(|a| a.ticker.eq_ignore_ascii_case(&t))
+    if let Some(asset) = B3_ASSET_CATALOG.iter().find(|a| a.ticker.eq_ignore_ascii_case(&t)) {
+        return Some(asset);
+    }
+    // Merged ticker aliases
+    match t.as_str() {
+        "ARZZ3" | "ARZZ4" | "SOMA3" | "SOMA4" => B3_ASSET_CATALOG.iter().find(|a| a.ticker == "AZZA3"),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -294,5 +310,22 @@ mod tests {
         let bbse4_results = search_b3_assets("BBSE4", None);
         assert_eq!(bbse4_results.len(), 1);
         assert_eq!(bbse4_results[0].ticker, "BBSE3");
+
+        // Test AZZA3 and merged ticker aliases (ARZZ3, SOMA3)
+        let azza_results = search_b3_assets("AZZA3", None);
+        assert!(!azza_results.is_empty());
+        assert_eq!(azza_results[0].ticker, "AZZA3");
+
+        let azza_prefix_results = search_b3_assets("AZZA", None);
+        assert!(!azza_prefix_results.is_empty());
+        assert_eq!(azza_prefix_results[0].ticker, "AZZA3");
+
+        let arzz_results = search_b3_assets("ARZZ3", None);
+        assert!(!arzz_results.is_empty());
+        assert_eq!(arzz_results[0].ticker, "AZZA3");
+
+        let soma_results = search_b3_assets("SOMA3", None);
+        assert!(!soma_results.is_empty());
+        assert_eq!(soma_results[0].ticker, "AZZA3");
     }
 }

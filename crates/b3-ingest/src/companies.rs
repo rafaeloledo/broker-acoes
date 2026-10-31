@@ -117,6 +117,11 @@ const ISSUERS: &[Issuer] = &[
         cnpj_digits: "34274233000102",
         name: "Vibra Energia S.A.",
     },
+    Issuer {
+        tickers: &["AZZA3", "ARZZ3", "SOMA3"],
+        cnpj_digits: "16590234000176",
+        name: "Azzas 2154 S.A.",
+    },
 ];
 
 pub fn cnpj_digits(raw: &str) -> String {
@@ -147,5 +152,17 @@ mod tests {
         assert_eq!(issuer.cnpj_digits, "17344597000194");
         assert_eq!(issuer.name, "BB Seguridade Participações S.A.");
         assert_eq!(tickers_for_cnpj("17.344.597/0001-94"), vec!["BBSE3"]);
+    }
+
+    #[test]
+    fn test_azza3_issuer() {
+        let issuer = issuer_for_ticker("azza3").expect("AZZA3 issuer should be found");
+        assert_eq!(issuer.cnpj_digits, "16590234000176");
+        assert_eq!(issuer.name, "Azzas 2154 S.A.");
+        assert!(tickers_for_cnpj("16.590.234/0001-76").contains(&"AZZA3"));
+
+        // Historical tickers mapped to Azzas 2154
+        assert_eq!(issuer_for_ticker("arzz3").map(|i| i.name), Some("Azzas 2154 S.A."));
+        assert_eq!(issuer_for_ticker("soma3").map(|i| i.name), Some("Azzas 2154 S.A."));
     }
 }

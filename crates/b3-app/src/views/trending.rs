@@ -14,7 +14,7 @@ impl AppState {
             return;
         }
 
-        let mut list = Vec::with_capacity(186);
+        let mut list = Vec::with_capacity(B3_ASSET_CATALOG.len());
         for asset in B3_ASSET_CATALOG {
             if self.trending_only_acoes && asset.asset_class != AssetClass::Acao {
                 continue;
@@ -171,7 +171,7 @@ impl AppState {
         ui.add_space(8.0);
 
         // Filter and sort items
-        let query = self.trending_search.trim().to_uppercase();
+        let query_norm = b3_core::b3_assets::normalize(self.trending_search.trim());
         let mut filtered: Vec<StockTrendAnalysis> = self
             .trending_cache
             .iter()
@@ -181,10 +181,12 @@ impl AppState {
                         return false;
                     }
                 }
-                if query.is_empty() {
+                if query_norm.is_empty() {
                     return true;
                 }
-                item.ticker.contains(&query) || item.name.to_uppercase().contains(&query) || item.sector.to_uppercase().contains(&query)
+                b3_core::b3_assets::normalize(&item.ticker).contains(&query_norm)
+                    || b3_core::b3_assets::normalize(&item.name).contains(&query_norm)
+                    || b3_core::b3_assets::normalize(&item.sector).contains(&query_norm)
             })
             .cloned()
             .collect();

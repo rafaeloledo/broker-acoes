@@ -736,6 +736,7 @@ mod tests {
             .collect();
 
         assert!(acoes.len() >= 120, "Should have all listed stocks in catalog");
+        assert!(acoes.iter().any(|a| a.ticker == "AZZA3"), "AZZA3 must be in B3 stocks catalog");
 
         for asset in &acoes {
             let ind = StockIndicators::default_for(asset.ticker);
@@ -757,6 +758,27 @@ mod tests {
             assert!(!analysis.risk_factors.is_empty(), "Must have risk factors for {}", asset.ticker);
             assert!(!analysis.summary_rationale.is_empty());
         }
+    }
+
+    #[test]
+    fn test_trending_search_azza3() {
+        use b3_core::b3_assets::search_b3_assets;
+
+        let results = search_b3_assets("AZZA3", None);
+        assert!(!results.is_empty());
+        assert_eq!(results[0].ticker, "AZZA3");
+
+        let results_name = search_b3_assets("Azzas", None);
+        assert!(!results_name.is_empty());
+        assert_eq!(results_name[0].ticker, "AZZA3");
+
+        let results_arzz = search_b3_assets("ARZZ3", None);
+        assert!(!results_arzz.is_empty());
+        assert_eq!(results_arzz[0].ticker, "AZZA3");
+
+        let results_soma = search_b3_assets("SOMA3", None);
+        assert!(!results_soma.is_empty());
+        assert_eq!(results_soma[0].ticker, "AZZA3");
     }
 }
 

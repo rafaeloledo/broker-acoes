@@ -134,6 +134,12 @@ impl CompanyProfile {
                 "Geração de Energia Elétrica",
                 815_927_740,
             ),
+            "AZZA3" | "ARZZ3" | "SOMA3" => (
+                "Azzas 2154 S.A.",
+                MarketSector::ConsumoCiclico,
+                "Varejo de Moda e Calçados",
+                205_800_000,
+            ),
             "HGLG11" => (
                 "CSHG Logística Fundo de Investimento Imobiliário",
                 MarketSector::Imobiliario,
