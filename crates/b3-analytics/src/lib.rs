@@ -1,10 +1,12 @@
 pub mod core_multiples;
 pub mod screener;
+pub mod trending;
 pub mod ttm;
 pub mod valuation;
 
 pub use core_multiples::*;
 pub use screener::*;
+pub use trending::*;
 pub use ttm::*;
 pub use valuation::*;
 

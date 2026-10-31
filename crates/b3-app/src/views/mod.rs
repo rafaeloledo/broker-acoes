@@ -6,3 +6,4 @@ mod portfolio;
 mod screener;
 mod search;
 mod terminal;
+mod trending;

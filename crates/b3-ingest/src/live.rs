@@ -25,6 +25,37 @@ pub struct BrapiResponse {
     pub results: Vec<BrapiQuoteResult>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct YahooChartResponse {
+    pub chart: YahooChartBody,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct YahooChartBody {
+    pub result: Option<Vec<YahooChartResult>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct YahooChartResult {
+    pub meta: YahooChartMeta,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct YahooChartMeta {
+    #[serde(rename = "regularMarketPrice")]
+    pub regular_market_price: Option<f64>,
+    #[serde(rename = "regularMarketDayHigh")]
+    pub regular_market_day_high: Option<f64>,
+    #[serde(rename = "regularMarketDayLow")]
+    pub regular_market_day_low: Option<f64>,
+    #[serde(rename = "regularMarketVolume")]
+    pub regular_market_volume: Option<f64>,
+    #[serde(rename = "chartPreviousClose")]
+    pub chart_previous_close: Option<f64>,
+    #[serde(rename = "regularMarketTime")]
+    pub regular_market_time: Option<i64>,
+}
+
 pub struct LiveFeedClient {
     client: Client,
 }
@@ -38,21 +69,81 @@ impl Default for LiveFeedClient {
 impl LiveFeedClient {
     pub fn new() -> Self {
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(8))
+            .user_agent("Mozilla/5.0 (X11; Linux x86_64)")
             .build()
             .unwrap_or_else(|_| Client::new());
         Self { client }
     }
 
     pub async fn fetch_brapi_quote(&self, ticker: &str) -> anyhow::Result<Option<Candle>> {
-        let url = format!("https://brapi.dev/api/quote/{}", ticker);
+        let mut url = format!("https://brapi.dev/api/quote/{}", ticker);
+        if let Ok(token) = std::env::var("BRAPI_TOKEN") {
+            let token = token.trim();
+            if !token.is_empty() {
+                url.push_str("?token=");
+                url.push_str(token);
+            }
+        }
+        if let Ok(resp) = self.client.get(&url).send().await {
+            if resp.status().is_success() {
+                if let Ok(data) = resp.json::<BrapiResponse>().await {
+                    if let Some(candle) = Self::candle_from_brapi(data, Utc::now().timestamp_millis()) {
+                        return Ok(Some(candle));
+                    }
+                }
+            }
+        }
+
+        // Fallback para Yahoo Finance quando Brapi falha, requer token ou não retorna preço
+        if let Ok(Some(candle)) = self.fetch_yahoo_quote(ticker).await {
+            return Ok(Some(candle));
+        }
+
+        Ok(None)
+    }
+
+    pub async fn fetch_yahoo_quote(&self, ticker: &str) -> anyhow::Result<Option<Candle>> {
+        let clean = ticker.trim().to_uppercase();
+        let symbol = if clean.ends_with(".SA") {
+            clean
+        } else {
+            format!("{clean}.SA")
+        };
+        let url = format!("https://query1.finance.yahoo.com/v8/finance/chart/{symbol}");
         let resp = self.client.get(&url).send().await?;
         if !resp.status().is_success() {
             return Ok(None);
         }
 
-        let data: BrapiResponse = resp.json().await?;
-        Ok(Self::candle_from_brapi(data, Utc::now().timestamp_millis()))
+        let body = resp.text().await?;
+        Self::parse_yahoo_quote(&body, Utc::now().timestamp_millis())
+    }
+
+    pub fn parse_yahoo_quote(body: &str, now_ms: i64) -> anyhow::Result<Option<Candle>> {
+        let data: YahooChartResponse = serde_json::from_str(body)?;
+        Ok(Self::candle_from_yahoo(data, now_ms))
+    }
+
+    fn candle_from_yahoo(data: YahooChartResponse, now_ms: i64) -> Option<Candle> {
+        let res = data.chart.result?.into_iter().next()?;
+        let meta = res.meta;
+        let price = meta.regular_market_price?;
+        let high = meta.regular_market_day_high.unwrap_or(price);
+        let low = meta.regular_market_day_low.unwrap_or(price);
+        let volume = meta.regular_market_volume.unwrap_or(0.0);
+        let open = meta.chart_previous_close.unwrap_or(price);
+        let ts = meta.regular_market_time.map(|s| s * 1000).unwrap_or(now_ms);
+        Some(Candle {
+            timestamp_ms: ts,
+            open,
+            high,
+            low,
+            close: price,
+            volume,
+            trades: 1,
+            adjusted_close: price,
+        })
     }
 
     pub fn parse_brapi_quote(body: &str, now_ms: i64) -> anyhow::Result<Option<Candle>> {
@@ -153,5 +244,41 @@ mod tests {
         // 02:00 UTC = 23:00 BRT of the previous day... use 03:00 UTC = 00:00 BRT Monday, outside.
         let monday_midnight_brt = 1_717_383_600_000;
         assert!(!LiveFeedClient::is_b3_session(monday_midnight_brt));
+    }
+
+    #[test]
+    fn test_parse_yahoo_quote_without_network() {
+        let body = r#"{
+            "chart": {
+                "result": [{
+                    "meta": {
+                        "symbol": "BBSE3.SA",
+                        "regularMarketPrice": 41.32,
+                        "regularMarketDayHigh": 42.00,
+                        "regularMarketDayLow": 41.10,
+                        "regularMarketVolume": 500000.0,
+                        "chartPreviousClose": 42.05,
+                        "regularMarketTime": 1700000000
+                    }
+                }]
+            }
+        }"#;
+        let candle = LiveFeedClient::parse_yahoo_quote(body, 1_700_000_000_000)
+            .unwrap()
+            .unwrap();
+        assert!((candle.close - 41.32).abs() < 1e-9);
+        assert!((candle.open - 42.05).abs() < 1e-9);
+        assert!((candle.high - 42.00).abs() < 1e-9);
+        assert_eq!(candle.timestamp_ms, 1_700_000_000_000);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_live_fallback_for_bbse3() {
+        let client = LiveFeedClient::new();
+        let candle = client.fetch_brapi_quote("BBSE3").await.unwrap();
+        assert!(candle.is_some());
+        let c = candle.unwrap();
+        assert!(c.close > 0.0);
     }
 }

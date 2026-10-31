@@ -34,8 +34,15 @@ pub enum MarketEvent {
     News,
 }
 
-pub fn spawn(db: Arc<Database>) -> crossbeam_channel::Receiver<MarketEvent> {
+pub fn spawn(
+    db: Arc<Database>,
+) -> (
+    crossbeam_channel::Receiver<MarketEvent>,
+    Arc<tokio::sync::Notify>,
+) {
     let (tx, rx) = crossbeam_channel::unbounded();
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let notify_loop = notify.clone();
     std::thread::spawn(move || {
         let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
             Ok(runtime) => runtime,
@@ -44,12 +51,16 @@ pub fn spawn(db: Arc<Database>) -> crossbeam_channel::Receiver<MarketEvent> {
                 return;
             }
         };
-        runtime.block_on(run(db, tx));
+        runtime.block_on(run(db, tx, notify_loop));
     });
-    rx
+    (rx, notify)
 }
 
-async fn run(db: Arc<Database>, tx: crossbeam_channel::Sender<MarketEvent>) {
+async fn run(
+    db: Arc<Database>,
+    tx: crossbeam_channel::Sender<MarketEvent>,
+    notify: Arc<tokio::sync::Notify>,
+) {
     let quotes = LiveFeedClient::new();
     let cvm_client = reqwest::Client::builder()
         .timeout(Duration::from_secs(180))
@@ -73,11 +84,15 @@ async fn run(db: Arc<Database>, tx: crossbeam_channel::Sender<MarketEvent>) {
         }
 
         let now = Utc::now().timestamp_millis();
+        let any_missing_quote = tickers
+            .iter()
+            .any(|t| db.latest_market_quote(t).ok().flatten().is_none());
         let due = match last_quote_ms {
             None => true,
             Some(previous) => {
-                LiveFeedClient::is_b3_session(now)
-                    && now.saturating_sub(previous) >= LiveFeedClient::QUOTE_POLL_INTERVAL_MS
+                any_missing_quote
+                    || (LiveFeedClient::is_b3_session(now)
+                        && now.saturating_sub(previous) >= LiveFeedClient::QUOTE_POLL_INTERVAL_MS)
             }
         };
         if due && !tickers.is_empty() {
@@ -135,7 +150,10 @@ async fn run(db: Arc<Database>, tx: crossbeam_channel::Sender<MarketEvent>) {
             let _ = tx.send(MarketEvent::News);
         }
 
-        sleep(Duration::from_secs(20)).await;
+        tokio::select! {
+            _ = sleep(Duration::from_secs(20)) => {}
+            _ = notify.notified() => {}
+        }
     }
 }
 

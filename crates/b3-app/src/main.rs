@@ -29,14 +29,25 @@ use market_feed::{MarketEvent, QuoteTick};
 use presentation::{format_metric, MetricId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ActiveView {
+pub enum ActiveView {
     Decision,
+    Trending,
     News,
     StatusInvest,
     GpuTerminal,
     MarketHeatmap,
     Screener,
     PortfolioTax,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrendingSort {
+    ScoreDesc,
+    GrahamUpsideDesc,
+    BazinUpsideDesc,
+    DividendYieldDesc,
+    RsiAsc,
+    TickerAsc,
 }
 
 pub const MAX_VISIBLE_ASSETS: usize = 4;
@@ -70,6 +81,7 @@ struct AppState {
     cvm_accounts: HashMap<String, Vec<(String, f64)>>,
     core_multiples: HashMap<String, CoreMultiples>,
     market_rx: crossbeam_channel::Receiver<MarketEvent>,
+    market_trigger: Arc<tokio::sync::Notify>,
 
     // Real-time market terminal
     order_book: OrderBook,
@@ -111,6 +123,15 @@ struct AppState {
     decision_news_generation: u64,
     dark_theme: bool,
     menu_open: bool,
+
+    // Trending View State
+    trending_search: String,
+    trending_filter_signal: Option<b3_analytics::TrendSignal>,
+    trending_selected_ticker: Option<String>,
+    trending_sort: TrendingSort,
+    trending_only_acoes: bool,
+    trending_cache: Vec<b3_analytics::StockTrendAnalysis>,
+    trending_last_computed_ms: i64,
 }
 
 impl AppState {
@@ -254,7 +275,7 @@ impl AppState {
             bids,
             asks,
         };
-        let market_rx = market_feed::spawn(db.clone());
+        let (market_rx, market_trigger) = market_feed::spawn(db.clone());
         let news_ticker = selected_ticker.clone();
         let news_attempted_at = db.latest_news_attempt().ok().flatten();
         let dark_theme = cc
@@ -266,7 +287,7 @@ impl AppState {
 
         Self {
             active_view: ActiveView::Decision,
-            selected_ticker,
+            selected_ticker: selected_ticker.clone(),
             visible_tickers,
             focused_ticker_idx: 0,
             search_query: String::new(),
@@ -288,6 +309,7 @@ impl AppState {
             cvm_accounts,
             core_multiples,
             market_rx,
+            market_trigger,
             order_book,
             recent_ticks: Vec::new(),
             is_live_sim_running: true,
@@ -319,6 +341,14 @@ impl AppState {
             decision_news_generation: u64::MAX,
             dark_theme,
             menu_open: false,
+
+            trending_search: String::new(),
+            trending_filter_signal: None,
+            trending_selected_ticker: Some(selected_ticker.clone()),
+            trending_sort: TrendingSort::ScoreDesc,
+            trending_only_acoes: true,
+            trending_cache: Vec::new(),
+            trending_last_computed_ms: 0,
         }
     }
 
@@ -326,11 +356,26 @@ impl AppState {
         if let Err(e) = self.db.set_user_tickers(&self.visible_tickers) {
             log::error!("Failed to persist user tickers to SQLite database: {}", e);
         }
+        self.market_trigger.notify_one();
     }
 
     fn ensure_asset_loaded(&mut self, ticker: &str) {
         let sym = ticker.to_uppercase();
         if self.stock_indicators.contains_key(&sym) {
+            if !self.market_as_of.contains_key(&sym) {
+                if let Ok(Some((candle, fetched_at))) = self.db.latest_market_quote(&sym) {
+                    self.current_prices.insert(sym.clone(), candle.close);
+                    self.market_as_of.insert(sym.clone(), fetched_at);
+                    if let Some(ind) = self.stock_indicators.get_mut(&sym) {
+                        ind.price = candle.close;
+                    }
+                }
+            }
+            if !self.cvm_year.contains_key(&sym) && AssetClass::from_symbol(&sym) != AssetClass::Fii {
+                if let Ok(Some((year, accounts))) = self.db.load_cvm_accounts(&sym) {
+                    self.store_cvm(&sym, year, accounts);
+                }
+            }
             return;
         }
 
@@ -370,6 +415,7 @@ impl AppState {
         let sym = ticker.to_uppercase();
         self.ensure_asset_loaded(&sym);
         self.selected_ticker = sym.clone();
+        self.news_ticker = sym.clone();
 
         if let Some(slot) = self.search_target_slot {
             if slot < self.visible_tickers.len() {
@@ -388,6 +434,7 @@ impl AppState {
                 self.focused_ticker_idx = pos;
             }
         }
+        self.search_target_slot = None;
         self.persist_visible_tickers();
     }
 
@@ -495,6 +542,13 @@ impl AppState {
         self.sim_prices.entry(quote.symbol.clone()).or_insert(quote.close);
         if let Some(ind) = self.stock_indicators.get_mut(&quote.symbol) {
             ind.price = quote.close;
+        }
+        if let Some(candles) = self.candles.get_mut(&quote.symbol) {
+            if let Some(last) = candles.last_mut() {
+                last.close = quote.close;
+                last.high = last.high.max(quote.close);
+                last.low = last.low.min(quote.close);
+            }
         }
         if let Some(accounts) = self.cvm_accounts.get(&quote.symbol).cloned() {
             self.recompute_core(&quote.symbol, quote.close, &accounts);
@@ -666,4 +720,39 @@ mod tests {
         assert_eq!(visible[0], "BBAS3");
         assert_eq!(visible[3], "XPML11");
     }
+
+    #[test]
+    fn test_trending_all_b3_stocks_analysis() {
+        use b3_core::b3_assets::B3_ASSET_CATALOG;
+        use b3_core::ticker::AssetClass;
+
+        let acoes: Vec<_> = B3_ASSET_CATALOG
+            .iter()
+            .filter(|a| a.asset_class == AssetClass::Acao)
+            .collect();
+
+        assert!(acoes.len() >= 120, "Should have all listed stocks in catalog");
+
+        for asset in &acoes {
+            let ind = StockIndicators::default_for(asset.ticker);
+            let analysis = b3_analytics::TrendingEngine::analyze_stock(
+                asset.ticker,
+                asset.name,
+                asset.sector,
+                asset.base_price,
+                &[],
+                &ind,
+                None,
+            );
+
+            assert_eq!(analysis.ticker, asset.ticker);
+            assert!(analysis.overall_score >= 0.0 && analysis.overall_score <= 100.0);
+            assert!(analysis.technical_score >= 0.0 && analysis.technical_score <= 100.0);
+            assert!(analysis.fundamental_score >= 0.0 && analysis.fundamental_score <= 100.0);
+            assert!(!analysis.buy_catalysts.is_empty(), "Must have catalysts for {}", asset.ticker);
+            assert!(!analysis.risk_factors.is_empty(), "Must have risk factors for {}", asset.ticker);
+            assert!(!analysis.summary_rationale.is_empty());
+        }
+    }
 }
+

@@ -113,7 +113,17 @@ impl AppState {
 
     fn previous_close(&self, sym: &str) -> Option<f64> {
         let candles = self.candles.get(sym)?;
-        let index = candles.len().checked_sub(2)?;
-        Some(candles.get(index)?.close)
+        if candles.len() >= 2 {
+            let index = candles.len() - 2;
+            Some(candles[index].close)
+        } else if let Some(candle) = candles.first() {
+            if candle.open > 0.0 && (candle.open - candle.close).abs() > 1e-4 {
+                Some(candle.open)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 }

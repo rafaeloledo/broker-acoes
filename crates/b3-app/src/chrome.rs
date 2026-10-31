@@ -5,6 +5,7 @@ use crate::{ActiveView, AppState, MAX_VISIBLE_ASSETS};
 
 const NAV: &[(ActiveView, &str)] = &[
     (ActiveView::Decision, "Decisão"),
+    (ActiveView::Trending, "Trending"),
     (ActiveView::News, "Notícias"),
     (ActiveView::GpuTerminal, "Terminal"),
     (ActiveView::MarketHeatmap, "Mapa"),
@@ -39,7 +40,7 @@ impl AppState {
         }
 
         let max_width = match self.active_view {
-            ActiveView::GpuTerminal | ActiveView::MarketHeatmap => 1280.0,
+            ActiveView::GpuTerminal | ActiveView::MarketHeatmap | ActiveView::Trending => 1280.0,
             _ => 1040.0,
         };
         show_centered(ui, max_width, |ui| {
@@ -50,6 +51,7 @@ impl AppState {
             ui.add_space(8.0);
             match self.active_view {
                 ActiveView::Decision => self.render_decision_view(ui),
+                ActiveView::Trending => self.render_trending_view(ui),
                 ActiveView::News => self.render_news_view(ui),
                 ActiveView::StatusInvest => self.render_status_invest_view(ui),
                 ActiveView::GpuTerminal => self.render_gpu_terminal_view(ui),
@@ -123,6 +125,14 @@ impl AppState {
 
     fn nav_count(&self, view: ActiveView) -> Option<usize> {
         match view {
+            ActiveView::Trending => {
+                let buy_signals = self
+                    .trending_cache
+                    .iter()
+                    .filter(|a| a.signal == b3_analytics::TrendSignal::StrongBuy || a.signal == b3_analytics::TrendSignal::Buy)
+                    .count();
+                (buy_signals > 0).then_some(buy_signals)
+            }
             ActiveView::News => {
                 let count = if !self.news_rows.is_empty() {
                     self.news_rows.len()

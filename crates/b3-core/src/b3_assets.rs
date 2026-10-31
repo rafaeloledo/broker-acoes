@@ -230,7 +230,7 @@ pub fn normalize(s: &str) -> String {
 
 pub fn search_b3_assets(query: &str, filter_class: Option<AssetClass>) -> Vec<&'static B3Asset> {
     let q = normalize(query.trim());
-    B3_ASSET_CATALOG
+    let mut results: Vec<&'static B3Asset> = B3_ASSET_CATALOG
         .iter()
         .filter(|asset| {
             if let Some(fc) = filter_class {
@@ -246,7 +246,26 @@ pub fn search_b3_assets(query: &str, filter_class: Option<AssetClass>) -> Vec<&'
             let sector_matches = normalize(asset.sector).contains(&q);
             ticker_matches || name_matches || sector_matches
         })
-        .collect()
+        .collect();
+
+    if results.is_empty() && q.len() >= 4 {
+        let prefix = &q[..4];
+        if prefix.chars().all(|c| c.is_ascii_alphabetic()) {
+            results = B3_ASSET_CATALOG
+                .iter()
+                .filter(|asset| {
+                    if let Some(fc) = filter_class {
+                        if asset.asset_class != fc {
+                            return false;
+                        }
+                    }
+                    normalize(asset.ticker).starts_with(prefix)
+                })
+                .collect();
+        }
+    }
+
+    results
 }
 
 pub fn find_b3_asset(ticker: &str) -> Option<&'static B3Asset> {
@@ -270,5 +289,10 @@ mod tests {
         let exact = find_b3_asset("VALE3");
         assert!(exact.is_some());
         assert_eq!(exact.unwrap().name, "Vale S.A. ON");
+
+        // Test fallback for non-existent ticker class (e.g. BBSE4 -> BBSE3)
+        let bbse4_results = search_b3_assets("BBSE4", None);
+        assert_eq!(bbse4_results.len(), 1);
+        assert_eq!(bbse4_results[0].ticker, "BBSE3");
     }
 }
