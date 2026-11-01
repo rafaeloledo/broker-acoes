@@ -17,6 +17,7 @@ const NEWS_POLL_INTERVAL_MS: i64 = 30 * 60 * 1000;
 pub struct QuoteTick {
     pub symbol: String,
     pub close: f64,
+    pub previous_close: Option<f64>,
     pub fetched_at_ms: i64,
 }
 
@@ -110,6 +111,7 @@ async fn run(
                             Ok(_) => updates.push(QuoteTick {
                                 symbol: ticker.clone(),
                                 close: candle.close,
+                                previous_close: if candle.open > 0.0 { Some(candle.open) } else { None },
                                 fetched_at_ms: fetched_at,
                             }),
                             Err(err) => log::warn!("Falha ao gravar cotação de {ticker}: {err}"),

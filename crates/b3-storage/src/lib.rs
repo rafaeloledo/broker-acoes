@@ -115,6 +115,7 @@ impl Database {
             "fetched_at_ms",
             "ALTER TABLE quotes ADD COLUMN fetched_at_ms INTEGER",
         )?;
+        let _ = conn.execute("DELETE FROM quotes WHERE source IS NULL", []);
         Ok(())
     }
 
@@ -135,8 +136,8 @@ impl Database {
         let tx = conn.transaction()?;
         {
             let mut stmt = tx.prepare_cached(
-                "INSERT OR REPLACE INTO quotes (symbol, timestamp_ms, open, high, low, close, volume, trades, adjusted_close)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+                "INSERT OR REPLACE INTO quotes (symbol, timestamp_ms, open, high, low, close, volume, trades, adjusted_close, source)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'imported')"
             )?;
             for c in candles {
                 stmt.execute(params![
@@ -157,10 +158,15 @@ impl Database {
     }
 
     pub fn get_quotes(&self, symbol: &str, limit: usize) -> anyhow::Result<Vec<Candle>> {
+        let symbol = symbol.trim().to_uppercase();
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT timestamp_ms, open, high, low, close, volume, trades, adjusted_close
-             FROM quotes WHERE symbol = ?1 ORDER BY timestamp_ms ASC LIMIT ?2",
+             FROM (
+                 SELECT timestamp_ms, open, high, low, close, volume, trades, adjusted_close
+                 FROM quotes WHERE symbol = ?1
+                 ORDER BY timestamp_ms DESC LIMIT ?2
+             ) ORDER BY timestamp_ms ASC",
         )?;
         let rows = stmt.query_map(params![symbol, limit as i64], |row| {
             Ok(Candle {
@@ -212,15 +218,20 @@ impl Database {
             .ok();
 
         if let Some((open, high, low, close, volume)) = existing {
-            if (close - candle.close).abs() < 1e-6 && (volume - candle.volume).abs() < 1e-6 {
+            let new_open = if candle.open > 0.0 { candle.open } else { open };
+            if (close - candle.close).abs() < 1e-6
+                && (volume - candle.volume).abs() < 1e-6
+                && (open - new_open).abs() < 1e-6
+            {
                 return Ok(DailyQuoteWrite::Unchanged);
             }
             let high = high.max(candle.high).max(candle.close);
             let low = low.min(candle.low).min(candle.close);
             conn.execute(
-                "UPDATE quotes SET high = ?1, low = ?2, close = ?3, volume = ?4, adjusted_close = ?5, fetched_at_ms = ?6
-                 WHERE symbol = ?7 AND timestamp_ms = ?8 AND source = 'market'",
+                "UPDATE quotes SET open = ?1, high = ?2, low = ?3, close = ?4, volume = ?5, adjusted_close = ?6, fetched_at_ms = ?7
+                 WHERE symbol = ?8 AND timestamp_ms = ?9 AND source = 'market'",
                 params![
+                    new_open,
                     high,
                     low,
                     candle.close,
@@ -231,7 +242,6 @@ impl Database {
                     day_ms
                 ],
             )?;
-            let _ = (open, low);
             Ok(DailyQuoteWrite::Updated)
         } else {
             conn.execute(

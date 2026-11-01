@@ -54,7 +54,7 @@ impl AppState {
                         } else {
                             palette.negative
                         };
-                        ui.label(RichText::new(format!("{value:+.2}% vs candle anterior")).color(color).size(13.0));
+                        ui.label(RichText::new(format!("{value:+.2}% vs dia anterior")).color(color).size(13.0));
                     }
                     None => {
                         ui.label(RichText::new("variação indisponível").color(palette.muted).size(13.0));
@@ -112,23 +112,23 @@ impl AppState {
     }
 
     fn previous_close(&self, sym: &str) -> Option<f64> {
+        if let Some(&prev) = self.previous_close_prices.get(sym) {
+            if prev > 0.0 {
+                return Some(prev);
+            }
+        }
         let candles = self.candles.get(sym)?;
         if let Some(candle) = candles.last() {
-            if candle.open > 0.0 && (candle.open - candle.close).abs() > 1e-4 && (candle.open - candle.close).abs() / candle.open < 0.25 {
+            if candle.open > 0.0 {
                 return Some(candle.open);
             }
         }
         if candles.len() >= 2 {
             let index = candles.len() - 2;
-            Some(candles[index].close)
-        } else if let Some(candle) = candles.first() {
-            if candle.open > 0.0 && (candle.open - candle.close).abs() > 1e-4 {
-                Some(candle.open)
-            } else {
-                None
+            if candles[index].close > 0.0 {
+                return Some(candles[index].close);
             }
-        } else {
-            None
         }
+        None
     }
 }

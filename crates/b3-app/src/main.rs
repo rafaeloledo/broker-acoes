@@ -75,6 +75,7 @@ struct AppState {
     fii_details: HashMap<String, FiiDetails>,
     candles: HashMap<String, Vec<Candle>>,
     current_prices: HashMap<String, f64>,
+    previous_close_prices: HashMap<String, f64>,
     sim_prices: HashMap<String, f64>,
     market_as_of: HashMap<String, i64>,
     cvm_year: HashMap<String, i32>,
@@ -184,6 +185,7 @@ impl AppState {
         let mut fii_details = HashMap::new();
         let mut candles = HashMap::new();
         let mut current_prices = HashMap::new();
+        let mut previous_close_prices = HashMap::new();
         let mut sim_prices = HashMap::new();
         let mut market_as_of = HashMap::new();
         let mut cvm_year = HashMap::new();
@@ -202,7 +204,7 @@ impl AppState {
             }
 
             let existing_quotes = db.get_quotes(t, 180).unwrap_or_default();
-            let sym_candles = if !existing_quotes.is_empty() {
+            let mut sym_candles = if !existing_quotes.is_empty() {
                 existing_quotes
             } else {
                 synthetic_candles(base_price)
@@ -210,8 +212,23 @@ impl AppState {
             if let Ok(Some((candle, fetched_at))) = db.latest_market_quote(t) {
                 current_prices.insert(t.clone(), candle.close);
                 market_as_of.insert(t.clone(), fetched_at);
+                if candle.open > 0.0 {
+                    previous_close_prices.insert(t.clone(), candle.open);
+                }
                 if let Some(ind) = stock_indicators.get_mut(t) {
                     ind.price = candle.close;
+                }
+                if let Some(last) = sym_candles.last_mut() {
+                    last.close = candle.close;
+                    last.high = last.high.max(candle.high).max(candle.close);
+                    last.low = last.low.min(candle.low).min(candle.close);
+                    if candle.open > 0.0 {
+                        last.open = candle.open;
+                    }
+                }
+            } else if let Some(last) = sym_candles.last() {
+                if last.open > 0.0 {
+                    previous_close_prices.insert(t.clone(), last.open);
                 }
             }
             if AssetClass::from_symbol(t) != AssetClass::Fii {
@@ -303,6 +320,7 @@ impl AppState {
             fii_details,
             candles,
             current_prices,
+            previous_close_prices,
             sim_prices,
             market_as_of,
             cvm_year,
@@ -391,7 +409,7 @@ impl AppState {
         }
 
         let existing_quotes = self.db.get_quotes(&sym, 180).unwrap_or_default();
-        let sym_candles = if !existing_quotes.is_empty() {
+        let mut sym_candles = if !existing_quotes.is_empty() {
             existing_quotes
         } else {
             synthetic_candles(base_price)
@@ -399,8 +417,23 @@ impl AppState {
         if let Ok(Some((candle, fetched_at))) = self.db.latest_market_quote(&sym) {
             self.current_prices.insert(sym.clone(), candle.close);
             self.market_as_of.insert(sym.clone(), fetched_at);
+            if candle.open > 0.0 {
+                self.previous_close_prices.insert(sym.clone(), candle.open);
+            }
             if let Some(ind) = self.stock_indicators.get_mut(&sym) {
                 ind.price = candle.close;
+            }
+            if let Some(last) = sym_candles.last_mut() {
+                last.close = candle.close;
+                last.high = last.high.max(candle.high).max(candle.close);
+                last.low = last.low.min(candle.low).min(candle.close);
+                if candle.open > 0.0 {
+                    last.open = candle.open;
+                }
+            }
+        } else if let Some(last) = sym_candles.last() {
+            if last.open > 0.0 {
+                self.previous_close_prices.insert(sym.clone(), last.open);
             }
         }
         self.candles.insert(sym.clone(), sym_candles);
@@ -540,6 +573,9 @@ impl AppState {
         self.current_prices.insert(quote.symbol.clone(), quote.close);
         self.market_as_of.insert(quote.symbol.clone(), quote.fetched_at_ms);
         self.sim_prices.entry(quote.symbol.clone()).or_insert(quote.close);
+        if let Some(prev) = quote.previous_close {
+            self.previous_close_prices.insert(quote.symbol.clone(), prev);
+        }
         if let Some(ind) = self.stock_indicators.get_mut(&quote.symbol) {
             ind.price = quote.close;
         }
@@ -548,6 +584,9 @@ impl AppState {
                 last.close = quote.close;
                 last.high = last.high.max(quote.close);
                 last.low = last.low.min(quote.close);
+                if let Some(prev) = quote.previous_close {
+                    last.open = prev;
+                }
             }
         }
         if let Some(accounts) = self.cvm_accounts.get(&quote.symbol).cloned() {
@@ -779,6 +818,21 @@ mod tests {
         let results_soma = search_b3_assets("SOMA3", None);
         assert!(!results_soma.is_empty());
         assert_eq!(results_soma[0].ticker, "AZZA3");
+    }
+
+    #[test]
+    fn test_previous_day_change_calculation() {
+        use crate::presentation::change_percent;
+
+        // ITUB4: current 38.69, previous close 39.54 => -2.15% (not +41%)
+        let change = change_percent(38.69, 39.54).expect("should compute change");
+        assert!((change - (-2.1497218)).abs() < 1e-4);
+        assert_eq!(format!("{change:+.2}% vs dia anterior"), "-2.15% vs dia anterior");
+
+        // VALE3: current 62.02, previous close 60.05 => +3.28%
+        let change_vale = change_percent(62.02, 60.05).expect("should compute change");
+        assert!((change_vale - 3.280599).abs() < 1e-4);
+        assert_eq!(format!("{change_vale:+.2}% vs dia anterior"), "+3.28% vs dia anterior");
     }
 }
 

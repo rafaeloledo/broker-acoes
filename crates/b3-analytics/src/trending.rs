@@ -198,10 +198,7 @@ impl TrendingEngine {
         }
 
         let previous_close = if let Some(last_candle) = candles.last() {
-            if last_candle.open > 0.0
-                && (last_candle.open - price).abs() / last_candle.open < 0.20
-                && (last_candle.open - price).abs() > 1e-4
-            {
+            if last_candle.open > 0.0 && (last_candle.open - price).abs() / last_candle.open < 0.25 {
                 // In daily market quotes from Yahoo Finance / Brapi, candle.open stores chartPreviousClose
                 Some(last_candle.open)
             } else if prices.len() >= 2 {

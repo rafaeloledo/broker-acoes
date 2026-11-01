@@ -347,7 +347,7 @@ impl AppState {
                 ui.label(RichText::new(format!("R$ {:.2}", item.current_price)).strong().size(22.0).color(palette.text));
                 if let Some(ch) = item.price_change_pct {
                     let c = if ch >= 0.0 { palette.positive } else { palette.negative };
-                    ui.label(RichText::new(format!("{ch:+.2}% vs candle anterior")).strong().size(13.0).color(c));
+                    ui.label(RichText::new(format!("{ch:+.2}% vs dia anterior")).strong().size(13.0).color(c));
                 }
             });
 

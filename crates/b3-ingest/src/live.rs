@@ -18,6 +18,8 @@ pub struct BrapiQuoteResult {
     pub regular_market_volume: Option<f64>,
     #[serde(rename = "regularMarketChangePercent")]
     pub regular_market_change_percent: Option<f64>,
+    #[serde(rename = "regularMarketPreviousClose")]
+    pub regular_market_previous_close: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,9 +159,17 @@ impl LiveFeedClient {
         let high = res.regular_market_day_high.unwrap_or(price);
         let low = res.regular_market_day_low.unwrap_or(price);
         let volume = res.regular_market_volume.unwrap_or(0.0);
+        let open = res
+            .regular_market_previous_close
+            .or_else(|| {
+                res.regular_market_change_percent.map(|chg_pct| {
+                    (price / (1.0 + chg_pct / 100.0) * 100.0).round() / 100.0
+                })
+            })
+            .unwrap_or(price);
         Some(Candle {
             timestamp_ms: now_ms,
-            open: price,
+            open,
             high,
             low,
             close: price,
@@ -234,6 +244,26 @@ mod tests {
         assert!((candle.close - 36.4).abs() < 1e-9);
         assert!((candle.high - 36.8).abs() < 1e-9);
         assert_eq!(candle.timestamp_ms, 1_700_000_000_000);
+    }
+
+    #[test]
+    fn test_parse_brapi_quote_with_previous_close() {
+        let body = r#"{
+            "results": [{
+                "symbol": "ITUB4",
+                "regularMarketPrice": 38.69,
+                "regularMarketDayHigh": 39.34,
+                "regularMarketDayLow": 38.69,
+                "regularMarketVolume": 51157200.0,
+                "regularMarketPreviousClose": 39.54,
+                "regularMarketChangePercent": -2.15
+            }]
+        }"#;
+        let candle = LiveFeedClient::parse_brapi_quote(body, 1_700_000_000_000)
+            .unwrap()
+            .unwrap();
+        assert!((candle.close - 38.69).abs() < 1e-9);
+        assert!((candle.open - 39.54).abs() < 1e-9, "open must store previous close");
     }
 
     #[test]
