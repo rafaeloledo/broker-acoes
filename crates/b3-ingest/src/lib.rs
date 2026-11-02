@@ -6,6 +6,7 @@ pub mod ipe;
 pub mod live;
 pub mod rss;
 pub mod sinacor;
+pub mod statusinvest;
 
 #[cfg(test)]
 mod tests {

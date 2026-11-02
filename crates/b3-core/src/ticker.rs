@@ -69,6 +69,35 @@ impl MarketSector {
             MarketSector::Outros => "Outros Setores",
         }
     }
+
+    pub fn from_name(name: &str) -> Self {
+        let n = name.to_lowercase();
+        if n.contains("petr") || n.contains("gás") || n.contains("combust") {
+            MarketSector::PetroleoGasBiocombustiveis
+        } else if n.contains("financ") || n.contains("banco") || n.contains("segur") {
+            MarketSector::Financeiro
+        } else if n.contains("miner") || n.contains("sider") || n.contains("metal") || n.contains("básico") {
+            MarketSector::MateriaisBasicos
+        } else if n.contains("energia") || n.contains("elétr") || n.contains("saneam") || n.contains("utilidade") {
+            MarketSector::UtilidadePublica
+        } else if n.contains("alimento") || n.contains("bebid") || n.contains("agro") || n.contains("não cíclico") {
+            MarketSector::ConsumoNaoCiclico
+        } else if n.contains("varejo") || n.contains("constru") || n.contains("moda") || n.contains("cíclico") {
+            MarketSector::ConsumoCiclico
+        } else if n.contains("indústr") || n.contains("bens ind") || n.contains("máquin") || n.contains("transp") {
+            MarketSector::BensIndustriais
+        } else if n.contains("saúde") || n.contains("farm") || n.contains("hosp") || n.contains("medic") {
+            MarketSector::Saude
+        } else if n.contains("tecno") || n.contains("softw") || n.contains("inform") {
+            MarketSector::TecnologiaInformacao
+        } else if n.contains("telecom") || n.contains("comunic") {
+            MarketSector::Comunicacoes
+        } else if n.contains("imobil") || n.contains("fii") || n.contains("shopping") || n.contains("laje") {
+            MarketSector::Imobiliario
+        } else {
+            MarketSector::Outros
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

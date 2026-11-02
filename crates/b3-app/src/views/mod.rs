@@ -1,6 +1,7 @@
 mod decision;
 mod ficha;
 mod heatmap;
+pub(crate) mod input_analysis;
 mod news;
 mod portfolio;
 mod screener;

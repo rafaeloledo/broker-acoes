@@ -111,7 +111,7 @@ impl AppState {
         }
     }
 
-    fn previous_close(&self, sym: &str) -> Option<f64> {
+    pub(crate) fn previous_close(&self, sym: &str) -> Option<f64> {
         if let Some(&prev) = self.previous_close_prices.get(sym) {
             if prev > 0.0 {
                 return Some(prev);

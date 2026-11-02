@@ -28,3 +28,4 @@ log.workspace = true
 env_logger.workspace = true
 anyhow.workspace = true
 reqwest.workspace = true
+arboard.workspace = true

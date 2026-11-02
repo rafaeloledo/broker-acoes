@@ -106,6 +106,12 @@ impl Database {
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 attempted_at_ms INTEGER NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS statusinvest_assets (
+                ticker TEXT PRIMARY KEY,
+                json_data TEXT NOT NULL,
+                fetched_at_ms INTEGER NOT NULL
+            );
             "#,
         )?;
         Self::ensure_column(&conn, "quotes", "source", "ALTER TABLE quotes ADD COLUMN source TEXT")?;
@@ -597,6 +603,55 @@ impl Database {
             Err(err) => Err(err.into()),
         }
     }
+
+    pub fn save_statusinvest_raw(
+        &self,
+        ticker: &str,
+        json_data: &str,
+        fetched_at_ms: i64,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT OR REPLACE INTO statusinvest_assets (ticker, json_data, fetched_at_ms)
+             VALUES (?1, ?2, ?3)",
+            params![ticker.to_uppercase(), json_data, fetched_at_ms],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_statusinvest_raw(&self, ticker: &str) -> anyhow::Result<Option<(String, i64)>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare_cached(
+            "SELECT json_data, fetched_at_ms FROM statusinvest_assets WHERE ticker = ?1",
+        )?;
+        let mut rows = stmt.query(params![ticker.to_uppercase()])?;
+        if let Some(row) = rows.next()? {
+            let json_data: String = row.get(0)?;
+            let fetched_at_ms: i64 = row.get(1)?;
+            Ok(Some((json_data, fetched_at_ms)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn load_all_statusinvest_raw(&self) -> anyhow::Result<Vec<(String, String, i64)>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT ticker, json_data, fetched_at_ms FROM statusinvest_assets",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        let mut result = Vec::new();
+        for r in rows {
+            result.push(r?);
+        }
+        Ok(result)
+    }
 }
 
 #[cfg(test)]
@@ -798,5 +853,19 @@ mod tests {
         assert!(db.latest_news_attempt().unwrap().is_none());
         db.mark_news_attempt(50).unwrap();
         assert_eq!(db.latest_news_attempt().unwrap(), Some(50));
+    }
+
+    #[test]
+    fn test_statusinvest_raw_storage() {
+        let db = Database::in_memory().unwrap();
+        assert!(db.get_statusinvest_raw("PETR4").unwrap().is_none());
+        db.save_statusinvest_raw("petr4", r#"{"ticker":"PETR4","price":38.5}"#, 1700000000).unwrap();
+        let fetched = db.get_statusinvest_raw("PETR4").unwrap().unwrap();
+        assert_eq!(fetched.0, r#"{"ticker":"PETR4","price":38.5}"#);
+        assert_eq!(fetched.1, 1700000000);
+
+        let all = db.load_all_statusinvest_raw().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].0, "PETR4");
     }
 }

@@ -31,6 +31,7 @@ use presentation::{format_metric, MetricId};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveView {
     Decision,
+    InputAnalysis,
     Trending,
     News,
     StatusInvest,
@@ -38,6 +39,22 @@ pub enum ActiveView {
     MarketHeatmap,
     Screener,
     PortfolioTax,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputAnalysisViewMode {
+    Cards,
+    Table,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputAnalysisSort {
+    InputOrder,
+    TickerAsc,
+    PriceDesc,
+    DyDesc,
+    ChangeDesc,
+    GrahamUpsideDesc,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +150,21 @@ struct AppState {
     trending_only_acoes: bool,
     trending_cache: Vec<b3_analytics::StockTrendAnalysis>,
     trending_last_computed_ms: i64,
+
+    // Análise por Input
+    pub(crate) input_analysis_text: String,
+    pub(crate) input_analysis_filter_class: Option<AssetClass>,
+    pub(crate) input_analysis_view_mode: InputAnalysisViewMode,
+    pub(crate) input_analysis_sort: InputAnalysisSort,
+    pub(crate) input_analysis_search: String,
+
+    // StatusInvest Real Data
+    pub(crate) statusinvest_client: Arc<b3_ingest::statusinvest::StatusInvestClient>,
+    pub(crate) statusinvest_tx: crossbeam_channel::Sender<Result<b3_ingest::statusinvest::StatusInvestAsset, (String, String)>>,
+    pub(crate) statusinvest_rx: crossbeam_channel::Receiver<Result<b3_ingest::statusinvest::StatusInvestAsset, (String, String)>>,
+    pub(crate) statusinvest_data: HashMap<String, b3_ingest::statusinvest::StatusInvestAsset>,
+    pub(crate) statusinvest_loading: std::collections::HashSet<String>,
+    pub(crate) statusinvest_errors: HashMap<String, String>,
 }
 
 impl AppState {
@@ -247,6 +279,28 @@ impl AppState {
             candles.insert(t.clone(), sym_candles);
         }
 
+        // Initialize StatusInvest client, channel, and load cached assets from SQLite
+        let statusinvest_client = Arc::new(b3_ingest::statusinvest::StatusInvestClient::new());
+        let (statusinvest_tx, statusinvest_rx) = crossbeam_channel::unbounded();
+        let mut statusinvest_data = HashMap::new();
+        if let Ok(records) = db.load_all_statusinvest_raw() {
+            for (sym, json_str, fetched_at) in records {
+                if let Ok(asset) = serde_json::from_str::<b3_ingest::statusinvest::StatusInvestAsset>(&json_str) {
+                    stock_indicators.insert(sym.clone(), asset.into_stock_indicators());
+                    company_profiles.insert(sym.clone(), asset.into_company_profile());
+                    if AssetClass::from_symbol(&sym) == AssetClass::Fii {
+                        fii_details.insert(sym.clone(), asset.into_fii_details());
+                    }
+                    current_prices.insert(sym.clone(), asset.price);
+                    if let Some(prev) = asset.previous_close {
+                        previous_close_prices.insert(sym.clone(), prev);
+                    }
+                    market_as_of.insert(sym.clone(), fetched_at);
+                    statusinvest_data.insert(sym, asset);
+                }
+            }
+        }
+
         // Initialize realistic portfolio with SINACOR trades (load from DB if present)
         let sample_note = r#"
             1-BOVESPA C VISTA PETR4 PETROBRAS PN 200 34,20 6.840,00 C
@@ -299,6 +353,10 @@ impl AppState {
             .storage
             .and_then(|storage| eframe::get_value(storage, "dark_theme"))
             .unwrap_or(true);
+        let input_analysis_text = cc
+            .storage
+            .and_then(|storage| eframe::get_value(storage, "input_analysis_text"))
+            .unwrap_or_else(|| "PETR4, VALE3, HGLG11, MXRF11".to_string());
         cc.egui_ctx
             .set_visuals(theme::Palette::from_dark(dark_theme).visuals());
 
@@ -367,6 +425,19 @@ impl AppState {
             trending_only_acoes: true,
             trending_cache: Vec::new(),
             trending_last_computed_ms: 0,
+
+            input_analysis_text,
+            input_analysis_filter_class: None,
+            input_analysis_view_mode: InputAnalysisViewMode::Cards,
+            input_analysis_sort: InputAnalysisSort::InputOrder,
+            input_analysis_search: String::new(),
+
+            statusinvest_client,
+            statusinvest_tx,
+            statusinvest_rx,
+            statusinvest_data,
+            statusinvest_loading: std::collections::HashSet::new(),
+            statusinvest_errors: HashMap::new(),
         }
     }
 
@@ -395,6 +466,34 @@ impl AppState {
                 }
             }
             return;
+        }
+
+        // Check if cached in SQLite statusinvest_assets
+        if let Ok(Some((json_str, fetched_at))) = self.db.get_statusinvest_raw(&sym) {
+            if let Ok(asset) = serde_json::from_str::<b3_ingest::statusinvest::StatusInvestAsset>(&json_str) {
+                let ind = asset.into_stock_indicators();
+                let prof = asset.into_company_profile();
+                self.current_prices.insert(sym.clone(), asset.price);
+                self.sim_prices.insert(sym.clone(), asset.price);
+                if let Some(prev) = asset.previous_close {
+                    self.previous_close_prices.insert(sym.clone(), prev);
+                }
+                self.stock_indicators.insert(sym.clone(), ind);
+                self.company_profiles.insert(sym.clone(), prof);
+                if AssetClass::from_symbol(&sym) == AssetClass::Fii {
+                    self.fii_details.insert(sym.clone(), asset.into_fii_details());
+                }
+                self.market_as_of.insert(sym.clone(), fetched_at);
+                let existing_quotes = self.db.get_quotes(&sym, 180).unwrap_or_default();
+                let sym_candles = if !existing_quotes.is_empty() {
+                    existing_quotes
+                } else {
+                    synthetic_candles(asset.price)
+                };
+                self.candles.insert(sym.clone(), sym_candles);
+                self.statusinvest_data.insert(sym.clone(), asset);
+                return;
+            }
         }
 
         let ind = StockIndicators::default_for(&sym);
@@ -637,12 +736,111 @@ impl AppState {
             local_display.to_string()
         }
     }
+
+    pub(crate) fn query_statusinvest(&mut self, ticker: &str, force: bool) {
+        let sym = ticker.trim().to_uppercase();
+        if sym.is_empty() {
+            return;
+        }
+        if self.statusinvest_loading.contains(&sym) {
+            return;
+        }
+        if !force {
+            if let Some(asset) = self.statusinvest_data.get(&sym) {
+                let now = Utc::now().timestamp_millis();
+                // If fetched in last 60 minutes, don't re-fetch automatically
+                if now - asset.fetched_at_ms < 60 * 60 * 1000 {
+                    return;
+                }
+            }
+        }
+
+        self.statusinvest_loading.insert(sym.clone());
+        self.statusinvest_errors.remove(&sym);
+
+        let client = self.statusinvest_client.clone();
+        let tx = self.statusinvest_tx.clone();
+        let target = sym.clone();
+
+        std::thread::spawn(move || {
+            let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                Ok(r) => r,
+                Err(e) => {
+                    let _ = tx.send(Err((target, format!("Runtime error: {e}"))));
+                    return;
+                }
+            };
+
+            let res = rt.block_on(async {
+                client.fetch_asset(&target).await
+            });
+
+            match res {
+                Ok(Some(asset)) => {
+                    let _ = tx.send(Ok(asset));
+                }
+                Ok(None) => {
+                    let _ = tx.send(Err((target, "Ativo não encontrado no StatusInvest".to_string())));
+                }
+                Err(err) => {
+                    let _ = tx.send(Err((target, err.to_string())));
+                }
+            }
+        });
+    }
+
+    pub(crate) fn drain_statusinvest_events(&mut self) {
+        while let Ok(msg) = self.statusinvest_rx.try_recv() {
+            match msg {
+                Ok(asset) => {
+                    let sym = asset.ticker.clone();
+                    self.statusinvest_loading.remove(&sym);
+                    self.statusinvest_errors.remove(&sym);
+
+                    if let Ok(json_data) = serde_json::to_string(&asset) {
+                        let _ = self.db.save_statusinvest_raw(&sym, &json_data, asset.fetched_at_ms);
+                    }
+
+                    self.stock_indicators.insert(sym.clone(), asset.into_stock_indicators());
+                    self.company_profiles.insert(sym.clone(), asset.into_company_profile());
+                    if AssetClass::from_symbol(&sym) == AssetClass::Fii {
+                        self.fii_details.insert(sym.clone(), asset.into_fii_details());
+                    }
+                    self.current_prices.insert(sym.clone(), asset.price);
+                    if let Some(prev) = asset.previous_close {
+                        self.previous_close_prices.insert(sym.clone(), prev);
+                    }
+                    self.market_as_of.insert(sym.clone(), asset.fetched_at_ms);
+
+                    if let Some(candles) = self.candles.get_mut(&sym) {
+                        if let Some(last) = candles.last_mut() {
+                            last.close = asset.price;
+                            last.high = last.high.max(asset.price);
+                            last.low = last.low.min(asset.price);
+                            if let Some(prev) = asset.previous_close {
+                                last.open = prev;
+                            }
+                        }
+                    } else {
+                        self.candles.insert(sym.clone(), synthetic_candles(asset.price));
+                    }
+
+                    self.statusinvest_data.insert(sym, asset);
+                }
+                Err((sym, err)) => {
+                    self.statusinvest_loading.remove(&sym);
+                    self.statusinvest_errors.insert(sym, err);
+                }
+            }
+        }
+    }
 }
 
 impl eframe::App for AppState {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.telemetry.on_frame();
         self.drain_market_events();
+        self.drain_statusinvest_events();
         ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
 
         // High-frequency refresh simulation
@@ -660,6 +858,7 @@ impl eframe::App for AppState {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "dark_theme", &self.dark_theme);
+        eframe::set_value(storage, "input_analysis_text", &self.input_analysis_text);
     }
 }
 

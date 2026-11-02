@@ -5,6 +5,7 @@ use crate::{ActiveView, AppState, MAX_VISIBLE_ASSETS};
 
 const NAV: &[(ActiveView, &str)] = &[
     (ActiveView::Decision, "Decisão"),
+    (ActiveView::InputAnalysis, "Análise por Input"),
     (ActiveView::Trending, "Trending"),
     (ActiveView::News, "Notícias"),
     (ActiveView::GpuTerminal, "Terminal"),
@@ -40,7 +41,7 @@ impl AppState {
         }
 
         let max_width = match self.active_view {
-            ActiveView::GpuTerminal | ActiveView::MarketHeatmap | ActiveView::Trending => 1280.0,
+            ActiveView::GpuTerminal | ActiveView::MarketHeatmap | ActiveView::Trending | ActiveView::InputAnalysis => 1280.0,
             _ => 1040.0,
         };
         show_centered(ui, max_width, |ui| {
@@ -51,6 +52,7 @@ impl AppState {
             ui.add_space(8.0);
             match self.active_view {
                 ActiveView::Decision => self.render_decision_view(ui),
+                ActiveView::InputAnalysis => self.render_input_analysis_view(ui),
                 ActiveView::Trending => self.render_trending_view(ui),
                 ActiveView::News => self.render_news_view(ui),
                 ActiveView::StatusInvest => self.render_status_invest_view(ui),
@@ -139,6 +141,10 @@ impl AppState {
                 } else {
                     self.decision_news.len()
                 };
+                (count > 0).then_some(count)
+            }
+            ActiveView::InputAnalysis => {
+                let count = crate::views::input_analysis::parse_input_tickers(&self.input_analysis_text).len();
                 (count > 0).then_some(count)
             }
             ActiveView::PortfolioTax => (!self.trades.is_empty()).then_some(self.trades.len()),
