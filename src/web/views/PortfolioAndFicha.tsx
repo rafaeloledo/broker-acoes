@@ -11,6 +11,7 @@ import {
   type AssetSnapshot,
   type PortfolioSnapshot,
 } from "../../shared/types.ts";
+import { IndicatorLabel } from "../components/IndicatorTooltip.tsx";
 
 interface PortfolioViewProps {
   portfolio: PortfolioSnapshot;
@@ -609,33 +610,45 @@ export const FichaView: React.FC<FichaViewProps> = ({
         {/* 6 Top KPI Cards */}
         <div className="grid-6">
           <div className="card-alt">
-            <div className="kpi-label">Dividend yield</div>
+            <div className="kpi-label">
+              <IndicatorLabel label="Dividend yield" lookupKey="Dividend Yield" />
+            </div>
             <div className="kpi-value text-accent">
               {(core?.dividendYield ?? ind.dividendYield).toFixed(2)}%
             </div>
           </div>
           <div className="card-alt">
-            <div className="kpi-label">P/L</div>
+            <div className="kpi-label">
+              <IndicatorLabel label="P/L" />
+            </div>
             <div className="kpi-value">
               {(core?.pl ?? ind.pl).toFixed(2)}
             </div>
           </div>
           <div className="card-alt">
-            <div className="kpi-label">P/VP</div>
+            <div className="kpi-label">
+              <IndicatorLabel label="P/VP" />
+            </div>
             <div className="kpi-value">
               {(core?.pvp ?? ind.pvp).toFixed(2)}
             </div>
           </div>
           <div className="card-alt">
-            <div className="kpi-label">EV/EBITDA</div>
+            <div className="kpi-label">
+              <IndicatorLabel label="EV/EBITDA" />
+            </div>
             <div className="kpi-value">{ind.evEbitda.toFixed(2)}</div>
           </div>
           <div className="card-alt">
-            <div className="kpi-label">ROE</div>
+            <div className="kpi-label">
+              <IndicatorLabel label="ROE" />
+            </div>
             <div className="kpi-value">{ind.roe.toFixed(1)}%</div>
           </div>
           <div className="card-alt">
-            <div className="kpi-label">ROIC</div>
+            <div className="kpi-label">
+              <IndicatorLabel label="ROIC" />
+            </div>
             <div className="kpi-value">{ind.roic.toFixed(1)}%</div>
           </div>
         </div>
@@ -643,7 +656,9 @@ export const FichaView: React.FC<FichaViewProps> = ({
         {/* 3 Valuation & Health Cards */}
         <div className="grid-3">
           <div className="card">
-            <div className="kpi-label">Preço justo de Graham</div>
+            <div className="kpi-label">
+              <IndicatorLabel label="Preço justo de Graham" />
+            </div>
             <div className="kpi-value">R$ {graham.toFixed(2)}</div>
             <div
               className={
@@ -661,7 +676,9 @@ export const FichaView: React.FC<FichaViewProps> = ({
           </div>
 
           <div className="card">
-            <div className="kpi-label">Preço teto Bazin</div>
+            <div className="kpi-label">
+              <IndicatorLabel label="Preço teto Bazin" />
+            </div>
             <div className="kpi-value">R$ {bazinCeiling.toFixed(2)}</div>
             <div
               className={bazinMargin >= 0 ? "text-positive" : "text-negative"}
@@ -692,7 +709,9 @@ export const FichaView: React.FC<FichaViewProps> = ({
           </div>
 
           <div className="card">
-            <div className="kpi-label">Piotroski e Altman Z</div>
+            <div className="kpi-label">
+              <IndicatorLabel label="Piotroski e Altman Z" />
+            </div>
             <div className="kpi-value">F-Score {ind.piotroskiFScore}/9</div>
             <div style={{ fontWeight: 600, marginTop: "4px" }}>
               Altman Z: {ind.altmanZScore.toFixed(2)}
@@ -709,19 +728,25 @@ export const FichaView: React.FC<FichaViewProps> = ({
             </strong>
             <div className="grid-4" style={{ marginBottom: "12px" }}>
               <div className="card-inset">
-                <div className="kpi-label">Segmento & Mandato</div>
+                <div className="kpi-label">
+                  <IndicatorLabel label="Segmento & Mandato" lookupKey="Segmento" />
+                </div>
                 <strong>{fiiSegmentDisplayName(fii.segment)}</strong>
                 <div className="kpi-sub">{fii.mandate}</div>
               </div>
               <div className="card-inset">
-                <div className="kpi-label">VP por Cota / Patrimônio</div>
+                <div className="kpi-label">
+                  <IndicatorLabel label="VP por Cota / Patrimônio" lookupKey="VPA (Patrimonial)" />
+                </div>
                 <strong>R$ {fii.navPerShare.toFixed(2)}</strong>
                 <div className="kpi-sub">
                   PL: R$ {(fii.netAssetValue / 1_000_000).toFixed(0)}M
                 </div>
               </div>
               <div className="card-inset">
-                <div className="kpi-label">Vacância Física / Financ.</div>
+                <div className="kpi-label">
+                  <IndicatorLabel label="Vacância Física / Financ." />
+                </div>
                 <strong>
                   {fii.physicalVacancyPercent != null
                     ? `${fii.physicalVacancyPercent.toFixed(1)}%`
@@ -738,12 +763,14 @@ export const FichaView: React.FC<FichaViewProps> = ({
                 </div>
               </div>
               <div className="card-inset">
-                <div className="kpi-label">Último Rendimento</div>
+                <div className="kpi-label">
+                  <IndicatorLabel label="Último Rendimento" />
+                </div>
                 <strong className="text-accent">
                   R$ {fii.lastDividend.toFixed(2)} / cota
                 </strong>
                 <div className="kpi-sub">
-                  Taxa Adm:{" "}
+                  <IndicatorLabel label="Taxa Adm." />:{" "}
                   {fii.adminFeePercent != null && fii.adminFeePercent > 0
                     ? `${fii.adminFeePercent.toFixed(2)}% a.a.`
                     : "Não informada"}
@@ -797,43 +824,43 @@ export const FichaView: React.FC<FichaViewProps> = ({
               Valuation
             </strong>
             <div className="kv-row">
-              <span className="text-muted">P/L</span>
+              <IndicatorLabel label="P/L" className="text-muted" />
               <strong>{ind.pl.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">P/VP</span>
+              <IndicatorLabel label="P/VP" className="text-muted" />
               <strong>{ind.pvp.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">EV/EBITDA</span>
+              <IndicatorLabel label="EV/EBITDA" className="text-muted" />
               <strong>{ind.evEbitda.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">EV/EBIT</span>
+              <IndicatorLabel label="EV/EBIT" className="text-muted" />
               <strong>{ind.evEbit.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">P/EBITDA</span>
+              <IndicatorLabel label="P/EBITDA" className="text-muted" />
               <strong>{ind.pEbitda.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">P/EBIT</span>
+              <IndicatorLabel label="P/EBIT" className="text-muted" />
               <strong>{ind.pEbit.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">P/SR (Receita)</span>
+              <IndicatorLabel label="P/SR (Receita)" className="text-muted" />
               <strong>{ind.pSr.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">P/Ativo</span>
+              <IndicatorLabel label="P/Ativo" className="text-muted" />
               <strong>{ind.pAtivo.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">P/Cap. Giro</span>
+              <IndicatorLabel label="P/Cap. Giro" className="text-muted" />
               <strong>{ind.pCapGiro.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">PEG Ratio</span>
+              <IndicatorLabel label="PEG Ratio" className="text-muted" />
               <strong>{ind.pegRatio.toFixed(2)}</strong>
             </div>
           </div>
@@ -849,31 +876,31 @@ export const FichaView: React.FC<FichaViewProps> = ({
               Endividamento
             </strong>
             <div className="kv-row">
-              <span className="text-muted">Dív. Líquida / PL</span>
+              <IndicatorLabel label="Dív. Líquida / PL" className="text-muted" />
               <strong>{ind.dividaLiqPl.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">Dív. Líquida / EBITDA</span>
+              <IndicatorLabel label="Dív. Líquida / EBITDA" className="text-muted" />
               <strong>{ind.dividaLiqEbitda.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">Dív. Líquida / EBIT</span>
+              <IndicatorLabel label="Dív. Líquida / EBIT" className="text-muted" />
               <strong>{ind.dividaLiqEbit.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">PL / Ativos</span>
+              <IndicatorLabel label="PL / Ativos" className="text-muted" />
               <strong>{ind.plAtivos.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">Passivos / Ativos</span>
+              <IndicatorLabel label="Passivos / Ativos" className="text-muted" />
               <strong>{ind.passivosAtivos.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">Liquidez Corrente</span>
+              <IndicatorLabel label="Liquidez Corrente" className="text-muted" />
               <strong>{ind.liquidezCorrente.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">Liquidez Seca</span>
+              <IndicatorLabel label="Liquidez Seca" className="text-muted" />
               <strong>{ind.liquidezSeca.toFixed(2)}</strong>
             </div>
           </div>
@@ -889,23 +916,23 @@ export const FichaView: React.FC<FichaViewProps> = ({
               Eficiência
             </strong>
             <div className="kv-row">
-              <span className="text-muted">Margem Bruta</span>
+              <IndicatorLabel label="Margem Bruta" className="text-muted" />
               <strong>{ind.margemBruta.toFixed(1)}%</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">Margem EBITDA</span>
+              <IndicatorLabel label="Margem EBITDA" className="text-muted" />
               <strong>{ind.margemEbitda.toFixed(1)}%</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">Margem EBIT</span>
+              <IndicatorLabel label="Margem EBIT" className="text-muted" />
               <strong>{ind.margemEbit.toFixed(1)}%</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">Margem Líquida</span>
+              <IndicatorLabel label="Margem Líquida" className="text-muted" />
               <strong>{ind.margemLiquida.toFixed(1)}%</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">Giro de Ativos</span>
+              <IndicatorLabel label="Giro de Ativos" className="text-muted" />
               <strong>{ind.giroAtivos.toFixed(2)}</strong>
             </div>
           </div>
@@ -921,35 +948,35 @@ export const FichaView: React.FC<FichaViewProps> = ({
               Rentabilidade & Por Ação
             </strong>
             <div className="kv-row">
-              <span className="text-muted">ROE</span>
+              <IndicatorLabel label="ROE" className="text-muted" />
               <strong>{ind.roe.toFixed(1)}%</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">ROIC</span>
+              <IndicatorLabel label="ROIC" className="text-muted" />
               <strong>{ind.roic.toFixed(1)}%</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">ROA</span>
+              <IndicatorLabel label="ROA" className="text-muted" />
               <strong>{ind.roa.toFixed(1)}%</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">CAGR Receitas (5a)</span>
+              <IndicatorLabel label="CAGR Receitas (5a)" className="text-muted" />
               <strong>{ind.cagrReceitas5a.toFixed(1)}%</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">CAGR Lucros (5a)</span>
+              <IndicatorLabel label="CAGR Lucros (5a)" className="text-muted" />
               <strong>{ind.cagrLucros5a.toFixed(1)}%</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">LPA</span>
+              <IndicatorLabel label="LPA" className="text-muted" />
               <strong>R$ {ind.lpa.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">VPA</span>
+              <IndicatorLabel label="VPA" className="text-muted" />
               <strong>R$ {ind.vpa.toFixed(2)}</strong>
             </div>
             <div className="kv-row">
-              <span className="text-muted">DPA</span>
+              <IndicatorLabel label="DPA" className="text-muted" />
               <strong>R$ {ind.dpa.toFixed(2)}</strong>
             </div>
           </div>
@@ -1050,13 +1077,17 @@ export const FichaView: React.FC<FichaViewProps> = ({
 
               <div className="card-inset">
                 <div className="kv-row">
-                  <span className="text-muted">Graham Justo</span>
+                  <IndicatorLabel label="Graham Justo" className="text-muted" />
                   <strong>
                     R$ {asset.indicators.grahamFairValue.toFixed(2)}
                   </strong>
                 </div>
                 <div className="kv-row">
-                  <span className="text-muted">Bazin Teto</span>
+                  <IndicatorLabel
+                    label="Bazin Teto"
+                    lookupKey="Bazin Teto (6%)"
+                    className="text-muted"
+                  />
                   <strong>
                     R$ {asset.indicators.bazinCeilingPrice.toFixed(2)}
                   </strong>
@@ -1070,7 +1101,11 @@ export const FichaView: React.FC<FichaViewProps> = ({
                   </strong>
                 </div>
                 <div className="kv-row">
-                  <span className="text-muted">F-Score / ROE</span>
+                  <IndicatorLabel
+                    label="F-Score / ROE"
+                    lookupKey="Piotroski F-Score"
+                    className="text-muted"
+                  />
                   <strong>
                     {asset.indicators.piotroskiFScore}/9 ·{" "}
                     {asset.indicators.roe.toFixed(1)}%
@@ -1084,9 +1119,14 @@ export const FichaView: React.FC<FichaViewProps> = ({
 
       {/* 26-row Comparative Matrix */}
       <div className="card">
-        <strong style={{ fontSize: "15px", display: "block", marginBottom: "10px" }}>
-          Matriz Comparativa de Indicadores Fundamentalistas
-        </strong>
+        <div className="flex-between" style={{ marginBottom: "10px" }}>
+          <strong style={{ fontSize: "15px" }}>
+            Matriz Comparativa de Indicadores Fundamentalistas
+          </strong>
+          <span className="text-muted" style={{ fontSize: "12px" }}>
+            Passe o mouse (ou toque) sobre qualquer indicador ⓘ para ver a leitura analítica
+          </span>
+        </div>
         <div className="table-scroll">
           <table className="data-table">
             <thead>
@@ -1101,7 +1141,7 @@ export const FichaView: React.FC<FichaViewProps> = ({
               {matrixRows.map((row) => (
                 <tr key={row.label}>
                   <td className="sticky-col" style={{ fontWeight: 600 }}>
-                    {row.label}
+                    <IndicatorLabel label={row.label} />
                   </td>
                   {comparedAssets.map((a) => (
                     <td key={a.ticker} style={{ fontFamily: "monospace" }}>

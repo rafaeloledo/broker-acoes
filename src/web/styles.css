@@ -850,3 +850,117 @@ textarea {
   border-radius: 999px;
   transition: width 0.25s ease;
 }
+
+/* Analytical Indicator Tooltips */
+.indicator-tooltip-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: help;
+  border-bottom: 1px dashed rgba(140, 155, 175, 0.45);
+  padding-bottom: 1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.indicator-tooltip-trigger:hover {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.indicator-tooltip-icon {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.75;
+  transition: color 0.15s, opacity 0.15s;
+}
+
+.indicator-tooltip-trigger:hover .indicator-tooltip-icon {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.indicator-tooltip-popover {
+  position: fixed;
+  z-index: 9999;
+  width: min(350px, calc(100vw - 24px));
+  background: var(--card);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+  pointer-events: none;
+  line-height: 1.45;
+}
+
+.indicator-tooltip-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.indicator-tooltip-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.indicator-tooltip-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--accent-alpha);
+  color: var(--accent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.indicator-tooltip-formula {
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--card-inset);
+  border: 1px solid var(--nav-border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  margin-bottom: 8px;
+}
+
+.indicator-tooltip-formula code {
+  color: var(--subtle);
+  font-family: monospace;
+  font-weight: 600;
+}
+
+.indicator-tooltip-summary {
+  font-size: 12px;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.indicator-tooltip-analysis {
+  border-top: 1px solid var(--nav-border);
+  padding-top: 7px;
+}
+
+.indicator-tooltip-analysis-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--warning);
+  margin-bottom: 3px;
+}
+
+.indicator-tooltip-analysis-body {
+  font-size: 12px;
+  color: var(--subtle);
+  white-space: pre-line;
+}
+

@@ -9,6 +9,7 @@ import {
   trendSignalLabel,
 } from "../../analytics/index.ts";
 import { type ActiveView, type AssetSnapshot } from "../../shared/types.ts";
+import { IndicatorLabel } from "../components/IndicatorTooltip.tsx";
 
 export function parseInputTickers(raw: string): string[] {
   const tokens = raw
@@ -497,7 +498,7 @@ export const InputAnalysisView: React.FC<InputAnalysisViewProps> = ({
                   <div className="grid-2" style={{ marginBottom: "10px" }}>
                     <div className="card-inset">
                       <div className="kv-row">
-                        <span className="text-muted">P/VP</span>
+                        <IndicatorLabel label="P/VP" className="text-muted" />
                         <strong>
                           {ind.pvp.toFixed(2)} (
                           {ind.pvp < 1
@@ -507,34 +508,49 @@ export const InputAnalysisView: React.FC<InputAnalysisViewProps> = ({
                         </strong>
                       </div>
                       <div className="kv-row">
-                        <span className="text-muted">VPA (Patrimonial)</span>
+                        <IndicatorLabel
+                          label="VPA (Patrimonial)"
+                          className="text-muted"
+                        />
                         <strong>R$ {fii.navPerShare.toFixed(2)}</strong>
                       </div>
                       <div className="kv-row">
-                        <span className="text-muted">Último Rendimento</span>
+                        <IndicatorLabel
+                          label="Último Rendimento"
+                          className="text-muted"
+                        />
                         <strong className="text-accent">
                           R$ {fii.lastDividend.toFixed(2)}
                         </strong>
                       </div>
                       <div className="kv-row">
-                        <span className="text-muted">DY 12M</span>
+                        <IndicatorLabel label="DY 12M" className="text-muted" />
                         <strong className="text-accent">
                           {ind.dividendYield.toFixed(2)}%
                         </strong>
                       </div>
                       <div className="kv-row">
-                        <span className="text-muted">Teto Bazin (6%)</span>
+                        <IndicatorLabel
+                          label="Teto Bazin (6%)"
+                          className="text-muted"
+                        />
                         <strong>R$ {ind.bazinCeilingPrice.toFixed(2)}</strong>
                       </div>
                     </div>
 
                     <div className="card-inset">
                       <div className="kv-row">
-                        <span className="text-muted">Segmento</span>
+                        <IndicatorLabel
+                          label="Segmento"
+                          className="text-muted"
+                        />
                         <strong>{fiiSegmentDisplayName(fii.segment)}</strong>
                       </div>
                       <div className="kv-row">
-                        <span className="text-muted">Vacância Física</span>
+                        <IndicatorLabel
+                          label="Vacância Física"
+                          className="text-muted"
+                        />
                         <strong>
                           {fii.physicalVacancyPercent != null
                             ? `${fii.physicalVacancyPercent.toFixed(1)}%`
@@ -546,7 +562,10 @@ export const InputAnalysisView: React.FC<InputAnalysisViewProps> = ({
                         </strong>
                       </div>
                       <div className="kv-row">
-                        <span className="text-muted">Vacância Financ.</span>
+                        <IndicatorLabel
+                          label="Vacância Financ."
+                          className="text-muted"
+                        />
                         <strong>
                           {fii.financialVacancyPercent != null
                             ? `${fii.financialVacancyPercent.toFixed(1)}%`
@@ -558,7 +577,10 @@ export const InputAnalysisView: React.FC<InputAnalysisViewProps> = ({
                         </strong>
                       </div>
                       <div className="kv-row">
-                        <span className="text-muted">Cotistas</span>
+                        <IndicatorLabel
+                          label="Cotistas"
+                          className="text-muted"
+                        />
                         <strong>
                           {fii.shareholdersCount != null &&
                           fii.shareholdersCount > 0
@@ -567,7 +589,10 @@ export const InputAnalysisView: React.FC<InputAnalysisViewProps> = ({
                         </strong>
                       </div>
                       <div className="kv-row">
-                        <span className="text-muted">Taxa Adm.</span>
+                        <IndicatorLabel
+                          label="Taxa Adm."
+                          className="text-muted"
+                        />
                         <strong>
                           {fii.adminFeePercent != null &&
                           fii.adminFeePercent > 0
@@ -581,19 +606,25 @@ export const InputAnalysisView: React.FC<InputAnalysisViewProps> = ({
                   <>
                     <div className="grid-4" style={{ marginBottom: "10px" }}>
                       <div className="card-alt">
-                        <div className="kpi-label">P/L</div>
+                        <div className="kpi-label">
+                          <IndicatorLabel label="P/L" />
+                        </div>
                         <div style={{ fontWeight: 700, fontSize: "16px" }}>
                           {trend.pl.toFixed(2)}
                         </div>
                       </div>
                       <div className="card-alt">
-                        <div className="kpi-label">P/VP</div>
+                        <div className="kpi-label">
+                          <IndicatorLabel label="P/VP" />
+                        </div>
                         <div style={{ fontWeight: 700, fontSize: "16px" }}>
                           {trend.pvp.toFixed(2)}
                         </div>
                       </div>
                       <div className="card-alt">
-                        <div className="kpi-label">Dividend Yield</div>
+                        <div className="kpi-label">
+                          <IndicatorLabel label="Dividend Yield" />
+                        </div>
                         <div
                           className="text-accent"
                           style={{ fontWeight: 700, fontSize: "16px" }}
@@ -602,7 +633,9 @@ export const InputAnalysisView: React.FC<InputAnalysisViewProps> = ({
                         </div>
                       </div>
                       <div className="card-alt">
-                        <div className="kpi-label">EV/EBITDA</div>
+                        <div className="kpi-label">
+                          <IndicatorLabel label="EV/EBITDA" />
+                        </div>
                         <div style={{ fontWeight: 700, fontSize: "16px" }}>
                           {ind.evEbitda.toFixed(2)}
                         </div>
@@ -612,31 +645,49 @@ export const InputAnalysisView: React.FC<InputAnalysisViewProps> = ({
                     <div className="grid-2" style={{ marginBottom: "10px" }}>
                       <div className="card-inset">
                         <div className="kv-row">
-                          <span className="text-muted">ROE / ROIC</span>
+                          <IndicatorLabel
+                            label="ROE / ROIC"
+                            lookupKey="ROE"
+                            className="text-muted"
+                          />
                           <strong>
                             {ind.roe.toFixed(1)}% / {ind.roic.toFixed(1)}%
                           </strong>
                         </div>
                         <div className="kv-row">
-                          <span className="text-muted">Margem Líq. / Bruta</span>
+                          <IndicatorLabel
+                            label="Margem Líq. / Bruta"
+                            lookupKey="Margem Líquida"
+                            className="text-muted"
+                          />
                           <strong>
                             {ind.margemLiquida.toFixed(1)}% /{" "}
                             {ind.margemBruta.toFixed(1)}%
                           </strong>
                         </div>
                         <div className="kv-row">
-                          <span className="text-muted">Dív. Líq/EBITDA</span>
+                          <IndicatorLabel
+                            label="Dív. Líq/EBITDA"
+                            lookupKey="Dív. Líq / EBITDA"
+                            className="text-muted"
+                          />
                           <strong>{ind.dividaLiqEbitda.toFixed(2)}x</strong>
                         </div>
                         <div className="kv-row">
-                          <span className="text-muted">Liquidez Corrente</span>
+                          <IndicatorLabel
+                            label="Liquidez Corrente"
+                            className="text-muted"
+                          />
                           <strong>{ind.liquidezCorrente.toFixed(2)}</strong>
                         </div>
                       </div>
 
                       <div className="card-inset">
                         <div className="kv-row">
-                          <span className="text-muted">Graham Justo</span>
+                          <IndicatorLabel
+                            label="Graham Justo"
+                            className="text-muted"
+                          />
                           <strong
                             className={
                               trend.grahamUpsidePct >= 0
@@ -650,7 +701,10 @@ export const InputAnalysisView: React.FC<InputAnalysisViewProps> = ({
                           </strong>
                         </div>
                         <div className="kv-row">
-                          <span className="text-muted">Bazin Teto (6%)</span>
+                          <IndicatorLabel
+                            label="Bazin Teto (6%)"
+                            className="text-muted"
+                          />
                           <strong
                             className={
                               trend.bazinUpsidePct >= 0
@@ -664,14 +718,22 @@ export const InputAnalysisView: React.FC<InputAnalysisViewProps> = ({
                           </strong>
                         </div>
                         <div className="kv-row">
-                          <span className="text-muted">LPA / VPA / DPA</span>
+                          <IndicatorLabel
+                            label="LPA / VPA / DPA"
+                            lookupKey="LPA"
+                            className="text-muted"
+                          />
                           <strong>
                             {ind.lpa.toFixed(2)} / {ind.vpa.toFixed(2)} /{" "}
                             {ind.dpa.toFixed(2)}
                           </strong>
                         </div>
                         <div className="kv-row">
-                          <span className="text-muted">F-Score / IFR 14</span>
+                          <IndicatorLabel
+                            label="F-Score / IFR 14"
+                            lookupKey="Piotroski F-Score"
+                            className="text-muted"
+                          />
                           <strong>
                             {ind.piotroskiFScore}/9 · IFR {trend.rsi14.toFixed(0)}
                           </strong>
