@@ -1,3 +1,5 @@
+node_modules/
+dist/
 /target
 **/*.rs.bk
 Cargo.lock
@@ -6,3 +8,4 @@ Cargo.lock
 *.db-wal
 *.db-shm
 news_feeds.txt
+.DS_Store

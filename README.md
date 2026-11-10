@@ -1,62 +1,65 @@
-# Broker-Ações
+# Broker-Ações (Web Edition)
 
-A high-performance, self-hosted Brazilian stock market (B3) desktop terminal and fundamental analysis platform built in Rust, powered by `wgpu` (Vulkan).
+A high-performance, self-hosted Brazilian stock market (B3) web terminal and fundamental analysis platform built with **Bun**, **TypeScript**, **React**, and **SQLite (`bun:sqlite`)**, managed with **`mise`**.
+
+Designed for **desktops, tablets, and smartphones**, inheriting all capabilities from the original desktop terminal.
 
 ## Features
 
-- **Fundamental Analysis**: Complete financial metrics (valuation, debt, efficiency, growth), valuation models (Graham, Bazin, Piotroski F-Score), and specialized FII tracking.
-- **GPU Terminal**: Hardware-accelerated OHLCV candlestick charting capable of 100k+ candles at high refresh rates, real-time Level 2 order book, and Times & Trades tape.
-- **Sector Heatmap**: Interactive GPU treemap with real-time price change gradients and tick pulse highlights.
-- **Stock Screener**: Multi-factor filtering with strategy presets (Greenblatt Magic Formula, Décio Bazin, Graham Deep Value).
-- **Portfolio & Tax**: SINACOR brokerage note parser, automated Preço Médio (PM) calculation with B3 fees, tax buckets (swing trade, day trade, FIIs), and DARF reports.
+- **Decision & CVM Fundamentals (`Decisão`)**: Live market quotes (Brapi + Yahoo Finance fallback), BRT market timestamps (`Mercado · HH:MM` vs `Cotação local`), CVM DFP annual statement multiples (`P/L`, `P/VP`, `Dividend Yield`, `Graham`, `Bazin`), and ticker-specific CVM Relevant Facts (`IPE`) + RSS news.
+- **Multi-Asset Input Analysis (`Análise por Input`)**: Paste or type any list of B3 tickers (`Ctrl+V` global paste support, 5 strategy presets), real-time live scraping from StatusInvest with SQLite caching, tailored cards for **Ações**, **FIIs**, and **ETFs/BDRs**, plus a 14-column Comparative Table.
+- **Quantitative Trending Engine (`Trending`)**: Evaluates all 187 cataloged B3 assets combining technical indicators (`SMA20`, `SMA50`, `RSI-14`, `Bollinger Bands`, `20d Momentum`) and fundamental valuation (`Graham`, `Bazin`, `DY`, `P/L`, `P/VP`, `ROE`, `Margem Líquida`, `Piotroski F-Score`, `Altman Z-Score`).
+- **Interactive OHLCV Terminal (`Terminal`)**: High-DPI hardware-accelerated Canvas candlestick charting (`1` focused chart with simulated Level 2 Order Book & 25-row Times & Trades tape, or `2x1` / `2x2` multi-chart grid for up to 4 watchlist assets) streamed over WebSockets.
+- **Sector Heatmap (`Mapa`)**: Interactive 12-asset B3 treemap with real-time price variation gradients and live tick flash highlights.
+- **Stock Screener (`Busca`)**: Multi-factor filtering with strategy presets (**Joel Greenblatt Magic Formula**, **Décio Bazin Preço Teto**, **Benjamin Graham Deep Value**).
+- **Portfolio & Tax (`Carteira & DARF 6015`)**: SINACOR brokerage note parser, manual trade entry, automated Preço Médio (PM) calculation with prorated B3 fees, tax buckets (Swing Trade with R$ 20,000 monthly sales exemption, Day Trade 20%, FIIs 20%, ETFs/BDRs 15%), category-isolated loss carryforward, IRRF deduction, and monthly DARF 6015 reports.
+- **Fundamental Sheet & Comparison (`Ficha`)**: Full 30+ indicator sheet, interactive Bazin target yield slider, FII Raio-X with real estate property breakdown, and side-by-side 26-row comparative matrix for 2–4 watchlist tickers.
+- **Responsive Design**: Adaptive navigation and layouts for **smartphones** (`< 640px` with bottom navigation bar, touch-scrollable watchlist, and sticky table columns), **tablets** (`640px–1024px`), and **desktops** (`> 1024px`), with **Dark** (`Escuro`) and **Light** (`Claro`) themes.
 
 ## Architecture
 
-```
-crates/
-├── b3-core/         # Domain models, indicators, tax rules
-├── b3-ingest/       # COTAHIST, CVM open data, SINACOR parser, live feed
-├── b3-storage/      # Embedded database & persistence
-├── b3-analytics/    # Valuation models, metrics & screener
-├── b3-portfolio/    # Position tracker & Brazilian tax engine
-├── b3-gpu/          # wgpu render pipelines & WGSL shaders
-└── b3-app/          # Desktop application binary
+```text
+├── mise.toml            # Toolchain (Bun) and task runner configuration
+├── package.json         # Project dependencies & scripts
+├── scripts/
+│   └── build.ts         # Bun native frontend bundler (dist/)
+├── src/
+│   ├── core/            # Domain models, 187-asset B3 catalog, quotes, CVM codes, tax & news models
+│   ├── analytics/       # Valuation models (Graham, Bazin, Piotroski, Altman Z), TTM, Screener, TrendingEngine
+│   ├── portfolio/       # Position tracker (PM) & Brazilian capital gains tax calculator (DARF 6015)
+│   ├── storage/         # Embedded SQLite persistence via bun:sqlite (broker.db)
+│   ├── ingest/          # Brapi/Yahoo quotes, CVM DFP/IPE, StatusInvest scraper, SINACOR, COTAHIST, RSS
+│   ├── shared/          # Shared API & WebSocket types
+│   ├── server/          # Bun.serve() HTTP API, WebSocket real-time broadcaster & market feed scheduler
+│   └── web/             # Responsive React UI, Dark/Light CSS theme, Canvas Candlestick & Treemap charts
+└── tests/
+    └── broker.test.ts   # Unit & integration test suite (bun test)
 ```
 
-## Getting Started
+## Getting Started with `mise`
 
 ### Prerequisites
 
-- Rust 1.80+
-- Vulkan-compatible GPU and drivers
+- [mise](https://mise.jdx.dev/) (`bun` is automatically provisioned via `mise.toml`)
 
-### Run
-
-```bash
-cargo run --release -p b3-app
-```
-
-### Test
+### Tasks
 
 ```bash
-cargo test --workspace
-```
+# Install dependencies
+mise run install
 
-## Persistence & Custom Watchlist
+# Run in development mode with live reload (http://localhost:3000)
+mise run dev
 
-Broker-Ações stores user watchlists, quotes, and portfolio trades in an embedded SQLite database (`broker.db` by default, or via `BROKER_DB_PATH`).
+# Build frontend assets and run TypeScript typecheck
+mise run build
 
-You can customize the active stocks directly in the interface or via SQLite:
+# Run production server
+mise run start
 
-```sql
--- View current user watchlist:
-SELECT * FROM user_watchlist ORDER BY slot_index ASC;
+# Run unit & integration test suite
+mise run test
 
--- Define your own custom stocks:
-DELETE FROM user_watchlist;
-INSERT INTO user_watchlist (slot_index, ticker) VALUES
-  (0, 'BBAS3'),
-  (1, 'TAEE11'),
-  (2, 'XPML11'),
-  (3, 'B3SA3');
+# Run TypeScript typecheck
+mise run typecheck
 ```

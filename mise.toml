@@ -1,0 +1,33 @@
+[tools]
+bun = "1.4.3"
+
+[env]
+BROKER_DB_PATH = "broker.db"
+PORT = "3000"
+
+[tasks.install]
+description = "Install project dependencies with Bun"
+run = "bun install"
+
+[tasks.build]
+description = "Build web frontend assets and run typecheck"
+depends = ["install"]
+run = "bun run build"
+
+[tasks.dev]
+description = "Start the Broker-Ações web server in development mode with live reload"
+depends = ["install"]
+run = "bun run dev"
+
+[tasks.start]
+description = "Start the Broker-Ações web server in production mode"
+depends = ["build"]
+run = "bun run start"
+
+[tasks.test]
+description = "Run unit and integration tests with Bun"
+run = "bun test"
+
+[tasks.typecheck]
+description = "Run TypeScript type checking"
+run = "bun run typecheck"
