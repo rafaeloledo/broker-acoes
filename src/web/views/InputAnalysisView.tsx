@@ -535,21 +535,45 @@ export const InputAnalysisView: React.FC<InputAnalysisViewProps> = ({
                       </div>
                       <div className="kv-row">
                         <span className="text-muted">Vacância Física</span>
-                        <strong>{fii.physicalVacancyPercent.toFixed(1)}%</strong>
+                        <strong>
+                          {fii.physicalVacancyPercent != null
+                            ? `${fii.physicalVacancyPercent.toFixed(1)}%`
+                            : fii.segment === "PapeisCRIs" ||
+                              fii.segment === "Agro" ||
+                              fii.segment === "FoF"
+                            ? "N/A (Papel)"
+                            : "Não informada"}
+                        </strong>
                       </div>
                       <div className="kv-row">
                         <span className="text-muted">Vacância Financ.</span>
-                        <strong>{fii.financialVacancyPercent.toFixed(1)}%</strong>
+                        <strong>
+                          {fii.financialVacancyPercent != null
+                            ? `${fii.financialVacancyPercent.toFixed(1)}%`
+                            : fii.segment === "PapeisCRIs" ||
+                              fii.segment === "Agro" ||
+                              fii.segment === "FoF"
+                            ? "N/A (Papel)"
+                            : "Não informada"}
+                        </strong>
                       </div>
                       <div className="kv-row">
                         <span className="text-muted">Cotistas</span>
                         <strong>
-                          {fii.shareholdersCount.toLocaleString("pt-BR")}
+                          {fii.shareholdersCount != null &&
+                          fii.shareholdersCount > 0
+                            ? fii.shareholdersCount.toLocaleString("pt-BR")
+                            : "Não informado"}
                         </strong>
                       </div>
                       <div className="kv-row">
                         <span className="text-muted">Taxa Adm.</span>
-                        <strong>{fii.adminFeePercent.toFixed(2)}% a.a.</strong>
+                        <strong>
+                          {fii.adminFeePercent != null &&
+                          fii.adminFeePercent > 0
+                            ? `${fii.adminFeePercent.toFixed(2)}% a.a.`
+                            : "Não informada"}
+                        </strong>
                       </div>
                     </div>
                   </div>

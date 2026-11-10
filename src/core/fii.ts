@@ -55,10 +55,10 @@ export interface FiiDetails {
   netAssetValue: number;
   navPerShare: number;
   totalShares: number;
-  physicalVacancyPercent: number;
-  financialVacancyPercent: number;
-  shareholdersCount: number;
-  adminFeePercent: number;
+  physicalVacancyPercent: number | null;
+  financialVacancyPercent: number | null;
+  shareholdersCount: number | null;
+  adminFeePercent: number | null;
   performanceFee: string;
   lastDividend: number;
   dividendYield12m: number;
@@ -70,43 +70,61 @@ export function defaultFiiDetails(symbol: string): FiiDetails {
   let segment: FiiSegment = "Hibrido";
   let navPerShare = 100.0;
   let shares = 10_000_000;
-  let physVac = 5.0;
+  let physVac: number | null = null;
+  let finVac: number | null = null;
+  let shareholders: number | null = null;
+  let adminFee: number | null = null;
   let div = 0.85;
 
   switch (sym) {
     case "HGLG11":
       segment = "Logistica";
-      navPerShare = 153.20;
-      shares = 33_787_545;
-      physVac = 4.2;
-      div = 1.10;
+      navPerShare = 166.43;
+      shares = 45_601_745;
+      physVac = 2.7;
+      finVac = 3.0;
+      shareholders = 608_345;
+      adminFee = 0.6;
+      div = 1.17;
       break;
     case "KNCR11":
       segment = "PapeisCRIs";
       navPerShare = 101.45;
-      shares = 57_094_570;
-      physVac = 0.0;
+      shares = 107_089_622;
+      physVac = null;
+      finVac = null;
+      shareholders = 904_998;
+      adminFee = 1.0;
       div = 1.02;
       break;
     case "MXRF11":
       segment = "PapeisCRIs";
       navPerShare = 9.85;
-      shares = 334_655_903;
-      physVac = 0.0;
+      shares = 567_206_273;
+      physVac = null;
+      finVac = null;
+      shareholders = 1_509_087;
+      adminFee = 0.9;
       div = 0.10;
       break;
     case "XPML11":
       segment = "Shoppings";
       navPerShare = 112.50;
-      shares = 60_796_275;
-      physVac = 4.8;
+      shares = 64_308_055;
+      physVac = 5.1;
+      finVac = null;
+      shareholders = 733_101;
+      adminFee = 0.75;
       div = 0.92;
       break;
     case "BTLG11":
       segment = "Logistica";
       navPerShare = 99.80;
-      shares = 42_150_000;
-      physVac = 2.1;
+      shares = 69_389_648;
+      physVac = 1.0;
+      finVac = 1.1;
+      shareholders = 505_908;
+      adminFee = 0.9;
       div = 0.78;
       break;
   }
@@ -121,33 +139,36 @@ export function defaultFiiDetails(symbol: string): FiiDetails {
     navPerShare,
     totalShares: shares,
     physicalVacancyPercent: physVac,
-    financialVacancyPercent: physVac * 0.9,
-    shareholdersCount: 425_000,
-    adminFeePercent: 0.8,
+    financialVacancyPercent: finVac,
+    shareholdersCount: shareholders,
+    adminFeePercent: adminFee,
     performanceFee: "20% sobre o que exceder 100% do CDI/IPCA+6%",
     lastDividend: div,
     dividendYield12m: ((div * 12.0) / navPerShare) * 100.0,
-    properties: [
-      {
-        name: "Centro Logístico Bandeirantes",
-        address: "Rodovia dos Bandeirantes, Km 38",
-        city: "Cajamar",
-        state: "SP",
-        areaM2: 85_400.0,
-        unitsCount: 24,
-        tenantsCount: 8,
-        vacancyPercent: physVac,
-      },
-      {
-        name: "Parque Industrial Betim",
-        address: "Via Expressa de Betim, 1500",
-        city: "Betim",
-        state: "MG",
-        areaM2: 62_100.0,
-        unitsCount: 16,
-        tenantsCount: 5,
-        vacancyPercent: physVac * 0.5,
-      },
-    ],
+    properties:
+      physVac != null
+        ? [
+            {
+              name: "Centro Logístico Bandeirantes",
+              address: "Rodovia dos Bandeirantes, Km 38",
+              city: "Cajamar",
+              state: "SP",
+              areaM2: 85_400.0,
+              unitsCount: 24,
+              tenantsCount: 8,
+              vacancyPercent: physVac,
+            },
+            {
+              name: "Parque Industrial Betim",
+              address: "Via Expressa de Betim, 1500",
+              city: "Betim",
+              state: "MG",
+              areaM2: 62_100.0,
+              unitsCount: 16,
+              tenantsCount: 5,
+              vacancyPercent: physVac * 0.5,
+            },
+          ]
+        : [],
   };
 }

@@ -245,6 +245,7 @@ export function getAllB3Assets(): readonly B3Asset[] {
 export function normalize(s: string): string {
   return s
     .toUpperCase()
+    .replace(/[º°ª]/g, "")
     .replace(/[ÁÀÂÃÄ]/g, "A")
     .replace(/[ÉÈÊË]/g, "E")
     .replace(/[ÍÌÎÏ]/g, "I")

@@ -53,10 +53,16 @@ export interface StatusInvestAsset {
   // FII fields
   fiiNavPerShare: number;
   fiiLastDividend: number;
-  fiiShareholdersCount: number;
+  fiiShareholdersCount: number | null;
+  fiiTotalShares?: number | null;
+  fiiNetAssetValue?: number | null;
   fiiSegment: string;
-  fiiPhysicalVacancy: number;
-  fiiFinancialVacancy: number;
+  fiiPhysicalVacancy: number | null;
+  fiiFinancialVacancy: number | null;
+  fiiAdminFee: number | null;
+  fiiPerformanceFee?: string | null;
+  fiiAdminName?: string | null;
+  fiiMandate?: string | null;
 }
 
 const STOCK_UNITS = new Set([
@@ -83,6 +89,24 @@ const ETF_11 = new Set([
   "SPXI11",
 ]);
 
+export function decodeHtmlEntities(raw: string): string {
+  if (!raw) return "";
+  return raw
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) =>
+      String.fromCodePoint(Number.parseInt(hex, 16))
+    )
+    .replace(/&#(\d+);/g, (_, dec) =>
+      String.fromCodePoint(Number.parseInt(dec, 10))
+    )
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .trim();
+}
+
 export function categoryOrderFor(ticker: string): string[] {
   const sym = ticker.trim().toUpperCase();
   if (STOCK_UNITS.has(sym)) {
@@ -101,9 +125,10 @@ export function categoryOrderFor(ticker: string): string[] {
 }
 
 export function parsePtBrF64(raw: string): number | null {
-  const cleaned = raw
+  const cleaned = decodeHtmlEntities(raw)
     .replace(/R\$/gi, "")
     .replace(/%/g, "")
+    .replace(/a\.a\.?/gi, "")
     .replace(/\s+/g, "")
     .trim();
   if (!cleaned || cleaned === "-" || cleaned === "--" || cleaned === "-%") {
@@ -115,18 +140,39 @@ export function parsePtBrF64(raw: string): number | null {
 }
 
 function classifyFiiSegment(raw: string): FiiSegment {
-  const s = normalize(raw);
-  if (s.includes("LOGIST") || s.includes("GALP")) return "Logistica";
+  const s = normalize(decodeHtmlEntities(raw));
+  if (s.includes("LOGIST") || s.includes("GALP") || s.includes("INDUSTR"))
+    return "Logistica";
   if (s.includes("LAJE") || s.includes("ESCRIT")) return "LajesCorporativas";
   if (s.includes("SHOP")) return "Shoppings";
-  if (s.includes("PAPEL") || s.includes("RECEB") || s.includes("TITULO") || s.includes("CRI"))
+  if (
+    s.includes("PAPEL") ||
+    s.includes("RECEB") ||
+    s.includes("TITULO") ||
+    s.includes("VALORES MOBILIARIOS") ||
+    s.includes("CRI")
+  )
     return "PapeisCRIs";
   if (s.includes("FOF") || s.includes("FUNDO DE FUNDO")) return "FoF";
   if (s.includes("AGRO") || s.includes("FIAGRO")) return "Agro";
   if (s.includes("EDUC") || s.includes("HOSP")) return "EducacionalHospitalar";
-  if (s.includes("RESID")) return "Residencial";
-  if (s.includes("HIBR") || s.includes("RENDA URB")) return "Hibrido";
+  if (s.includes("RESID") || s.includes("INCORPOR")) return "Residencial";
+  if (s.includes("HIBR") || s.includes("RENDA URB") || s.includes("MISTO"))
+    return "Hibrido";
   return "Hibrido";
+}
+
+export interface FiiExternalEnrichment {
+  shareholdersCount: number | null;
+  totalShares: number | null;
+  netAssetValue: number | null;
+  physicalVacancy: number | null;
+  financialVacancy: number | null;
+  adminFee: number | null;
+  performanceFee: string | null;
+  adminName: string | null;
+  mandate: string | null;
+  segment: string | null;
 }
 
 export class StatusInvestClient {
@@ -154,7 +200,8 @@ export class StatusInvestClient {
       const res = await fetch(url, {
         headers: {
           "User-Agent": this.userAgent,
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
         },
         signal: AbortSignal.timeout(12000),
@@ -188,22 +235,22 @@ export class StatusInvestClient {
     const pairs = new Map<string, string>();
 
     const pairRegexes = [
-      /<h3[^>]*class="[^"]*title[^"]*"[^>]*>([\s\S]*?)<\/h3>[\s\S]*?<strong[^>]*class="[^"]*value[^"]*"[^>]*>([\s\S]*?)<\/strong>/gi,
-      /<span[^>]*class="[^"]*title[^"]*"[^>]*>([\s\S]*?)<\/span>[\s\S]*?<strong[^>]*class="[^"]*value[^"]*"[^>]*>([\s\S]*?)<\/strong>/gi,
-      /<span[^>]*class="[^"]*sub-value[^"]*"[^>]*>([\s\S]*?)<\/span>[\s\S]*?<strong[^>]*class="[^"]*value[^"]*"[^>]*>([\s\S]*?)<\/strong>/gi,
+      /<h3[^>]*class="(?:[^"]*\s)?title(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/h3>[\s\S]{0,600}?<strong[^>]*class="(?:[^"]*\s)?value(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/strong>/gi,
+      /<span[^>]*class="(?:[^"]*\s)?title(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/span>[\s\S]{0,400}?<strong[^>]*class="(?:[^"]*\s)?value(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/strong>/gi,
+      /<span[^>]*>\s*(Último rendimento|Próximo rendimento)\s*<\/span>[\s\S]{0,400}?<strong[^>]*class="(?:[^"]*\s)?value(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/strong>/gi,
+      /<span[^>]*class="(?:[^"]*\s)?sub-title(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/span>\s*<span[^>]*class="(?:[^"]*\s)?sub-value(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/span>/gi,
+      /<span[^>]*class="(?:[^"]*\s)?sub-value(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/span>\s*(?:<div>\s*)?<strong[^>]*class="(?:[^"]*\s)?value(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/strong>/gi,
     ];
 
     for (const re of pairRegexes) {
       let m: RegExpExecArray | null;
       while ((m = re.exec(html)) !== null) {
-        const rawKey = m[1]!
-          .replace(/<[^>]+>/g, " ")
-          .replace(/\s+/g, " ")
-          .trim();
-        const rawVal = m[2]!
-          .replace(/<[^>]+>/g, " ")
-          .replace(/\s+/g, " ")
-          .trim();
+        const rawKey = decodeHtmlEntities(
+          m[1]!.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")
+        );
+        const rawVal = decodeHtmlEntities(
+          m[2]!.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")
+        );
         const key = normalize(rawKey);
         if (key && rawVal && !pairs.has(key)) {
           pairs.set(key, rawVal);
@@ -224,7 +271,7 @@ export class StatusInvestClient {
       return null;
     };
 
-    const price = findNum("VALOR ATUAL", "COTAÇÃO", "PRECO ATUAL");
+    const price = findNum("VALOR ATUAL", "COTACAO", "PRECO ATUAL");
     if (price == null || price <= 0) return null;
 
     let changePercent = 0.0;
@@ -243,18 +290,21 @@ export class StatusInvestClient {
         : price;
 
     const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-    let name = sym;
+    let name = pairs.get("NOME PREGAO") ?? sym;
     if (titleMatch?.[1]) {
-      const rawTitle = titleMatch[1]
-        .replace(/<[^>]+>/g, "")
-        .split("-")[1]
-        ?.split("|")[0]
-        ?.trim();
+      const rawTitle = decodeHtmlEntities(
+        titleMatch[1]
+          .replace(/<[^>]+>/g, "")
+          .split("-")[1]
+          ?.split("|")[0]
+          ?.split(":")[0] ?? ""
+      ).trim();
       if (rawTitle) name = rawTitle;
     }
 
     const baseInd = defaultStockIndicators(sym);
-    const dividendYield = findNum("D.Y", "DIVIDEND YIELD") ?? baseInd.dividendYield;
+    const dividendYield =
+      findNum("D.Y", "DIVIDEND YIELD") ?? baseInd.dividendYield;
     const pl = findNum("P/L") ?? baseInd.pl;
     const pvp = findNum("P/VP") ?? baseInd.pvp;
     const evEbitda = findNum("EV/EBITDA") ?? baseInd.evEbitda;
@@ -276,7 +326,8 @@ export class StatusInvestClient {
     const dividaLiqEbitda =
       findNum("DIV. LIQUIDA/EBITDA") ?? baseInd.dividaLiqEbitda;
     const dividaLiqEbit = findNum("DIV. LIQUIDA/EBIT") ?? baseInd.dividaLiqEbit;
-    const liquidezCorrente = findNum("LIQ. CORRENTE") ?? baseInd.liquidezCorrente;
+    const liquidezCorrente =
+      findNum("LIQ. CORRENTE") ?? baseInd.liquidezCorrente;
     const margemBruta = findNum("M. BRUTA") ?? baseInd.margemBruta;
     const margemEbitda = findNum("M. EBITDA") ?? baseInd.margemEbitda;
     const margemEbit = findNum("M. EBIT") ?? baseInd.margemEbit;
@@ -296,16 +347,54 @@ export class StatusInvestClient {
     const fiiNavPerShare = findNum("VAL. PATRIMONIAL P/COTA") ?? vpa;
     const fiiLastDividend =
       findNum("ULTIMO RENDIMENTO", "RENDIMENTO MENSAL MEDIO") ?? dpa / 12.0;
-    const fiiShareholdersCount = Math.round(
-      findNum("N DE COTISTAS", "NUMERO DE COTISTAS") ?? 150_000
-    );
-    const fiiPhysicalVacancy = findNum("VACANCIA") ?? 3.5;
-    const fiiFinancialVacancy = fiiPhysicalVacancy * 0.9;
-    const fiiSegment = pairs.get("SEGMENTO") ?? "Híbrido";
 
-    const sector = pairs.get("SETOR DE ATUACAO") ?? fiiSegment;
-    const subsector = pairs.get("SUBSETOR DE ATUACAO") ?? sector;
-    const segment = pairs.get("SEGMENTO DE ATUACAO") ?? fiiSegment;
+    const rawShareholders = findNum(
+      "N DE COTISTAS",
+      "NUMERO DE COTISTAS",
+      "NUMERO COTISTAS"
+    );
+    const fiiShareholdersCount =
+      rawShareholders != null && rawShareholders > 0
+        ? Math.round(rawShareholders)
+        : null;
+
+    const rawTotalShares = findNum(
+      "N DE COTAS",
+      "NUMERO DE COTAS",
+      "COTAS EMITIDAS"
+    );
+    const fiiTotalShares =
+      rawTotalShares != null && rawTotalShares > 0
+        ? Math.round(rawTotalShares)
+        : null;
+
+    const rawNetAssetValue = findNum("PATRIMONIO", "PATRIMONIO LIQUIDO");
+    const fiiNetAssetValue =
+      rawNetAssetValue != null && rawNetAssetValue > 0
+        ? rawNetAssetValue
+        : null;
+
+    const fiiPhysicalVacancy = findNum("VACANCIA FISICA", "VACANCIA");
+    const fiiFinancialVacancy = findNum("VACANCIA FINANCEIRA");
+    const fiiAdminFee = findNum(
+      "TAXAS ADM",
+      "TAXA DE ADMINISTRACAO",
+      "TAXA ADMINISTRACAO"
+    );
+
+    const fiiSegment = decodeHtmlEntities(
+      pairs.get("SEGMENTO") || pairs.get("SEGMENTO ANBIMA") || "Híbrido"
+    );
+
+    const sector = decodeHtmlEntities(
+      pairs.get("SETOR DE ATUACAO") ?? fiiSegment
+    );
+    const subsector = decodeHtmlEntities(
+      pairs.get("SUBSETOR DE ATUACAO") ?? sector
+    );
+    const segment = decodeHtmlEntities(
+      pairs.get("SEGMENTO DE ATUACAO") ?? fiiSegment
+    );
 
     return {
       ticker: sym,
@@ -353,24 +442,262 @@ export class StatusInvestClient {
       fiiNavPerShare,
       fiiLastDividend,
       fiiShareholdersCount,
+      fiiTotalShares,
+      fiiNetAssetValue,
       fiiSegment,
       fiiPhysicalVacancy,
       fiiFinancialVacancy,
+      fiiAdminFee,
     };
+  }
+
+  static parseFundsExplorerHtml(html: string): FiiExternalEnrichment | null {
+    try {
+      const m = html.match(
+        /var\s+dataLayer_content\s*=\s*(\{[\s\S]*?\});\s*dataLayer\.push/
+      );
+      if (!m?.[1]) return null;
+      const dl = JSON.parse(m[1]) as {
+        pagePostTerms?: { meta?: Record<string, unknown> };
+      };
+      const meta = dl.pagePostTerms?.meta;
+      if (!meta || typeof meta !== "object") return null;
+
+      const toPosNum = (v: unknown): number | null => {
+        if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+        if (typeof v === "string" && v.trim() !== "") {
+          const p = parsePtBrF64(v);
+          if (p != null && p > 0) return p;
+        }
+        return null;
+      };
+
+      const toNonNegNum = (v: unknown): number | null => {
+        if (typeof v === "number" && Number.isFinite(v) && v >= 0) return v;
+        if (typeof v === "string" && v.trim() !== "") {
+          const p = parsePtBrF64(v);
+          if (p != null && p >= 0) return p;
+        }
+        return null;
+      };
+
+      const shareholdersCount = toPosNum(meta.numero_cotista);
+      const totalShares = toPosNum(meta.numero_cotas);
+      const netAssetValue = toPosNum(meta.patrimonio);
+
+      let physicalVacancy: number | null = null;
+      let financialVacancy: number | null = null;
+      const vacCount = Number(meta.vacancia ?? 0);
+      if (Number.isFinite(vacCount) && vacCount > 0) {
+        // Check the latest period (or n-2 only if n-1 is completely blank)
+        for (const idx of [vacCount - 1, vacCount - 2]) {
+          if (idx < 0) continue;
+          const pf = toNonNegNum(meta[`vacancia_${idx}_vacancia_fisica`]);
+          const ff = toNonNegNum(meta[`vacancia_${idx}_vacancia_financeira`]);
+          if (pf != null || ff != null) {
+            physicalVacancy = pf;
+            financialVacancy = ff;
+            break;
+          }
+        }
+      }
+
+      const adm = toPosNum(meta.taxa_de_adm);
+      const gestao = toPosNum(meta.taxa_de_gestao);
+      const adminFee =
+        adm != null || gestao != null
+          ? Number(((adm ?? 0) + (gestao ?? 0)).toFixed(4))
+          : null;
+
+      let performanceFee: string | null = null;
+      const perf = meta.taxa_de_performance;
+      if (typeof perf === "number" && perf > 0) {
+        performanceFee = `${perf}% sobre o benchmark`;
+      } else if (typeof perf === "string" && perf.trim() !== "") {
+        performanceFee = perf.trim();
+      }
+
+      const adminName =
+        typeof meta.administrador === "string" && meta.administrador.trim()
+          ? meta.administrador.trim()
+          : null;
+      const mandate =
+        typeof meta.tipo_anbima === "string" && meta.tipo_anbima.trim()
+          ? meta.tipo_anbima.trim()
+          : null;
+
+      const setorAtuacao =
+        typeof meta.setor_atuacao === "string" ? meta.setor_atuacao.trim() : "";
+      const subsetorAtuacao =
+        typeof meta.subsetor_atuacao === "string"
+          ? meta.subsetor_atuacao.trim()
+          : "";
+      const segAmbima =
+        typeof meta.segmento_ambima === "string"
+          ? meta.segmento_ambima.trim()
+          : "";
+      const segment =
+        setorAtuacao.toUpperCase().includes("PAPEL")
+          ? "Papéis / Recebíveis"
+          : subsetorAtuacao || segAmbima || setorAtuacao || null;
+
+      return {
+        shareholdersCount:
+          shareholdersCount != null ? Math.round(shareholdersCount) : null,
+        totalShares: totalShares != null ? Math.round(totalShares) : null,
+        netAssetValue,
+        physicalVacancy,
+        financialVacancy,
+        adminFee,
+        performanceFee,
+        adminName,
+        mandate,
+        segment,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  static parseInvestidor10Html(html: string): Partial<FiiExternalEnrichment> {
+    const out: Partial<FiiExternalEnrichment> = {};
+    try {
+      const cells = html.matchAll(
+        /<span[^>]*class="[^"]*\bname\b[^"]*"[^>]*>([\s\S]*?)<\/span>\s*<div[^>]*class="[^"]*\bvalue\b[^"]*"[^>]*>\s*<span>([\s\S]*?)<\/span>/gi
+      );
+      let isPapel = false;
+      let rawVacancy: number | null = null;
+
+      for (const c of cells) {
+        const key = normalize(
+          decodeHtmlEntities(c[1]!.replace(/<[^>]+>/g, " ").replace(/\s+/g, " "))
+        );
+        const val = decodeHtmlEntities(
+          c[2]!.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")
+        );
+        if (key.includes("TIPO DE FUNDO") && normalize(val).includes("PAPEL")) {
+          isPapel = true;
+        }
+        if (key.includes("TAXA DE ADMINISTRACAO")) {
+          const pctMatch = val.match(/(\d+(?:[.,]\d+)?)\s*%/);
+          if (pctMatch?.[1]) {
+            const fee = parsePtBrF64(pctMatch[1]);
+            if (fee != null && fee > 0) out.adminFee = fee;
+          }
+        } else if (key === "VACANCIA" || key.includes("VACANCIA")) {
+          const v = parsePtBrF64(val);
+          if (v != null && v >= 0) rawVacancy = v;
+        } else if (key.includes("NUMERO DE COTISTAS")) {
+          const sc = parsePtBrF64(val);
+          if (sc != null && sc > 0) out.shareholdersCount = Math.round(sc);
+        } else if (key.includes("COTAS EMITIDAS")) {
+          const ts = parsePtBrF64(val);
+          if (ts != null && ts > 0) out.totalShares = Math.round(ts);
+        }
+      }
+
+      if (!isPapel && rawVacancy != null) {
+        out.physicalVacancy = rawVacancy;
+      }
+    } catch {
+      // Ignore parse errors
+    }
+    return out;
   }
 
   async fetchAsset(ticker: string): Promise<StatusInvestAsset | null> {
     const sym = ticker.trim().toUpperCase();
     const categories = categoryOrderFor(sym);
 
+    let parsed: StatusInvestAsset | null = null;
     for (const cat of categories) {
       const url = `https://statusinvest.com.br/${cat}/${sym.toLowerCase()}`;
       const html = await this.fetchHtml(url);
       if (!html) continue;
-      const parsed = StatusInvestClient.parseHtml(sym, cat, html);
-      if (parsed) return parsed;
+      parsed = StatusInvestClient.parseHtml(sym, cat, html);
+      if (parsed) break;
     }
-    return null;
+
+    if (!parsed) return null;
+
+    // Enrich FII fields (Vacancy, Admin Fee, Shareholders, Total Shares) from FundsExplorer & Investidor10
+    if (parsed.category === "fundos-imobiliarios") {
+      const feHtml = await this.fetchHtml(
+        `https://www.fundsexplorer.com.br/funds/${sym.toLowerCase()}`
+      );
+      if (feHtml) {
+        const fe = StatusInvestClient.parseFundsExplorerHtml(feHtml);
+        if (fe) {
+          if (parsed.fiiShareholdersCount == null && fe.shareholdersCount != null) {
+            parsed.fiiShareholdersCount = fe.shareholdersCount;
+          }
+          if (parsed.fiiTotalShares == null && fe.totalShares != null) {
+            parsed.fiiTotalShares = fe.totalShares;
+          }
+          if (parsed.fiiNetAssetValue == null && fe.netAssetValue != null) {
+            parsed.fiiNetAssetValue = fe.netAssetValue;
+          }
+          if (parsed.fiiPhysicalVacancy == null && fe.physicalVacancy != null) {
+            parsed.fiiPhysicalVacancy = fe.physicalVacancy;
+          }
+          if (parsed.fiiFinancialVacancy == null && fe.financialVacancy != null) {
+            parsed.fiiFinancialVacancy = fe.financialVacancy;
+          }
+          if (parsed.fiiAdminFee == null && fe.adminFee != null) {
+            parsed.fiiAdminFee = fe.adminFee;
+          }
+          if (fe.performanceFee) {
+            parsed.fiiPerformanceFee = fe.performanceFee;
+          }
+          if (fe.adminName) {
+            parsed.fiiAdminName = fe.adminName;
+          }
+          if (fe.mandate) {
+            parsed.fiiMandate = fe.mandate;
+          }
+          if (
+            fe.segment &&
+            (!parsed.fiiSegment ||
+              parsed.fiiSegment === "Híbrido" ||
+              parsed.fiiSegment === "Outros")
+          ) {
+            parsed.fiiSegment = fe.segment;
+          }
+        }
+      }
+
+      if (
+        parsed.fiiAdminFee == null ||
+        parsed.fiiShareholdersCount == null
+      ) {
+        const i10Html = await this.fetchHtml(
+          `https://investidor10.com.br/fiis/${sym.toLowerCase()}/`
+        );
+        if (i10Html) {
+          const i10 = StatusInvestClient.parseInvestidor10Html(i10Html);
+          if (parsed.fiiAdminFee == null && i10.adminFee != null) {
+            parsed.fiiAdminFee = i10.adminFee;
+          }
+          if (
+            parsed.fiiShareholdersCount == null &&
+            i10.shareholdersCount != null
+          ) {
+            parsed.fiiShareholdersCount = i10.shareholdersCount;
+          }
+          if (parsed.fiiTotalShares == null && i10.totalShares != null) {
+            parsed.fiiTotalShares = i10.totalShares;
+          }
+          if (
+            parsed.fiiPhysicalVacancy == null &&
+            i10.physicalVacancy != null
+          ) {
+            parsed.fiiPhysicalVacancy = i10.physicalVacancy;
+          }
+        }
+      }
+    }
+
+    return parsed;
   }
 
   static deserializeRaw(
@@ -402,13 +729,28 @@ export class StatusInvestClient {
         return fallback;
       };
 
+      const optNum = (
+        camel: string,
+        snake: string
+      ): number | null => {
+        const v = obj[camel] ?? obj[snake];
+        if (typeof v === "number" && Number.isFinite(v)) return v;
+        if (typeof v === "string" && v.trim() !== "") {
+          const parsed = Number.parseFloat(v);
+          if (Number.isFinite(parsed)) return parsed;
+        }
+        return null;
+      };
+
       const str = (
         camel: string,
         snake: string,
         fallback: string
       ): string => {
         const v = obj[camel] ?? obj[snake];
-        return typeof v === "string" && v.trim() ? v.trim() : fallback;
+        return typeof v === "string" && v.trim()
+          ? decodeHtmlEntities(v.trim())
+          : fallback;
       };
 
       const price = num("price", "price", baseInd.price);
@@ -424,6 +766,32 @@ export class StatusInvestClient {
       const vpa = num("vpa", "vpa", baseInd.vpa);
       const lpa = num("lpa", "lpa", baseInd.lpa);
       const dpa = num("dpa", "dpa", (dividendYield / 100.0) * price);
+
+      // Detect legacy synthetic fallback values in cached JSON
+      let fiiShareholdersCount = optNum(
+        "fiiShareholdersCount",
+        "fii_shareholders_count"
+      );
+      let fiiPhysicalVacancy = optNum(
+        "fiiPhysicalVacancy",
+        "fii_physical_vacancy"
+      );
+      let fiiFinancialVacancy = optNum(
+        "fiiFinancialVacancy",
+        "fii_financial_vacancy"
+      );
+      const fiiAdminFee =
+        optNum("fiiAdminFee", "fii_admin_fee") ?? baseFii.adminFeePercent;
+
+      const isLegacyFakeRow =
+        fiiShareholdersCount === 150000 &&
+        fiiPhysicalVacancy === 3.5 &&
+        fiiFinancialVacancy === 3.15;
+      if (isLegacyFakeRow) {
+        fiiShareholdersCount = baseFii.shareholdersCount;
+        fiiPhysicalVacancy = baseFii.physicalVacancyPercent;
+        fiiFinancialVacancy = baseFii.financialVacancyPercent;
+      }
 
       return {
         ticker,
@@ -501,7 +869,9 @@ export class StatusInvestClient {
         grahamFairValue: num(
           "grahamFairValue",
           "graham_fair_value",
-          lpa > 0 && vpa > 0 ? Math.sqrt(22.5 * lpa * vpa) : baseInd.grahamFairValue
+          lpa > 0 && vpa > 0
+            ? Math.sqrt(22.5 * lpa * vpa)
+            : baseInd.grahamFairValue
         ),
         bazinCeilingPrice: num(
           "bazinCeilingPrice",
@@ -518,22 +888,24 @@ export class StatusInvestClient {
           "fii_last_dividend",
           baseFii.lastDividend
         ),
-        fiiShareholdersCount: num(
-          "fiiShareholdersCount",
-          "fii_shareholders_count",
-          baseFii.shareholdersCount
-        ),
+        fiiShareholdersCount:
+          fiiShareholdersCount != null && fiiShareholdersCount > 0
+            ? fiiShareholdersCount
+            : baseFii.shareholdersCount,
+        fiiTotalShares: optNum("fiiTotalShares", "fii_total_shares"),
+        fiiNetAssetValue: optNum("fiiNetAssetValue", "fii_net_asset_value"),
         fiiSegment: str("fiiSegment", "fii_segment", "Híbrido"),
-        fiiPhysicalVacancy: num(
-          "fiiPhysicalVacancy",
-          "fii_physical_vacancy",
-          baseFii.physicalVacancyPercent
-        ),
-        fiiFinancialVacancy: num(
-          "fiiFinancialVacancy",
-          "fii_financial_vacancy",
-          baseFii.financialVacancyPercent
-        ),
+        fiiPhysicalVacancy,
+        fiiFinancialVacancy,
+        fiiAdminFee,
+        fiiPerformanceFee:
+          typeof obj.fiiPerformanceFee === "string"
+            ? obj.fiiPerformanceFee
+            : null,
+        fiiAdminName:
+          typeof obj.fiiAdminName === "string" ? obj.fiiAdminName : null,
+        fiiMandate:
+          typeof obj.fiiMandate === "string" ? obj.fiiMandate : null,
       };
     } catch {
       return null;
@@ -587,31 +959,62 @@ export class StatusInvestClient {
     const base = defaultFiiDetails(asset.ticker);
     const fin = (v: number | null | undefined, fb: number) =>
       typeof v === "number" && Number.isFinite(v) ? v : fb;
+    const optFin = (
+      v: number | null | undefined,
+      fb: number | null
+    ): number | null =>
+      typeof v === "number" && Number.isFinite(v) ? v : fb;
 
     const navPerShare =
       fin(asset.fiiNavPerShare, 0) > 0
         ? fin(asset.fiiNavPerShare, base.navPerShare)
         : base.navPerShare;
+    const totalShares =
+      typeof asset.fiiTotalShares === "number" && asset.fiiTotalShares > 0
+        ? asset.fiiTotalShares
+        : base.totalShares;
+    const netAssetValue =
+      typeof asset.fiiNetAssetValue === "number" && asset.fiiNetAssetValue > 0
+        ? asset.fiiNetAssetValue
+        : navPerShare * totalShares;
     const lastDiv =
       fin(asset.fiiLastDividend, 0) > 0
         ? fin(asset.fiiLastDividend, base.lastDividend)
         : base.lastDividend;
-    const physVac = fin(asset.fiiPhysicalVacancy, base.physicalVacancyPercent);
-    const finVac = fin(asset.fiiFinancialVacancy, physVac * 0.9);
+
+    const physVac = optFin(
+      asset.fiiPhysicalVacancy,
+      base.physicalVacancyPercent
+    );
+    const finVac = optFin(
+      asset.fiiFinancialVacancy,
+      base.financialVacancyPercent
+    );
+    const shareholders =
+      typeof asset.fiiShareholdersCount === "number" &&
+      asset.fiiShareholdersCount > 0
+        ? asset.fiiShareholdersCount
+        : base.shareholdersCount;
+    const adminFee =
+      typeof asset.fiiAdminFee === "number" && asset.fiiAdminFee > 0
+        ? asset.fiiAdminFee
+        : base.adminFeePercent;
     const dy12 = fin(asset.dividendYield, base.dividendYield12m);
 
     return {
       ...base,
       symbol: asset.ticker,
       segment: classifyFiiSegment(asset.fiiSegment || asset.segment || ""),
+      mandate: asset.fiiMandate || base.mandate,
+      admin: asset.fiiAdminName || base.admin,
       navPerShare,
-      netAssetValue: navPerShare * base.totalShares,
+      totalShares,
+      netAssetValue,
       physicalVacancyPercent: physVac,
       financialVacancyPercent: finVac,
-      shareholdersCount:
-        fin(asset.fiiShareholdersCount, 0) > 0
-          ? fin(asset.fiiShareholdersCount, base.shareholdersCount)
-          : base.shareholdersCount,
+      shareholdersCount: shareholders,
+      adminFeePercent: adminFee,
+      performanceFee: asset.fiiPerformanceFee || base.performanceFee,
       lastDividend: lastDiv,
       dividendYield12m: dy12 > 0 ? dy12 : base.dividendYield12m,
     };
@@ -622,12 +1025,12 @@ export class StatusInvestClient {
     return {
       ...base,
       symbol: asset.ticker,
-      name: asset.name || base.name,
+      name: decodeHtmlEntities(asset.name || base.name),
       sector: asset.sector
         ? marketSectorFromName(asset.sector)
         : base.sector,
-      subsector: asset.subsector || base.subsector,
-      segment: asset.segment || base.segment,
+      subsector: decodeHtmlEntities(asset.subsector || base.subsector),
+      segment: decodeHtmlEntities(asset.segment || base.segment),
     };
   }
 }

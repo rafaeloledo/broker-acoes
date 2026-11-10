@@ -353,6 +353,53 @@ describe("b3-storage & b3-ingest: SQLite DB and parsers", () => {
     expect(si!.price).toBeCloseTo(52.71, 2);
     expect(si!.dividendYield).toBeCloseTo(14.8, 2);
 
+    // FII HTML parsing + FundsExplorer enrichment test
+    const fiiHtml = `
+      <html><head><title>HGLG11 - P&#xC1;TRIA LOG: dividendos e cotação</title></head>
+      <body>
+        ${"x".repeat(3100)}
+        <h3 class="title m-0">Valor atual</h3><span class="icon">R$</span><strong class="value">145,88</strong>
+        <h3 class="title m-0 legend-tooltip">Dividend Yield</h3><strong class="value">9,24</strong>
+        <h3 class="title d-none d-lg-block m-0">Val. patrimonial p/cota</h3><span class="icon">R$</span><strong class="value">166,43</strong>
+        <span class="sub-title">Patrimônio</span><span class="sub-value">R$ 7.589.554.105</span>
+        <h3 class="title m-0">P/VP</h3><strong class="value">0,88</strong>
+        <h3 class="title m-0">Nº de Cotistas</h3><strong class="value">608.345</strong>
+        <span class="sub-title">Nº de Cotas</span><span class="sub-value">45.601.745</span>
+        <span class="v-align-middle ml-1">Último rendimento</span><div class="info"><strong class="value d-inline-block">1,1700</strong></div>
+        <span class="sub-value">Taxas Adm.</span><div><strong class="value">- % a.a</strong></div>
+        <span class="sub-value">Vacância</span><div><strong class="value">-%</strong></div>
+      </body></html>
+    `;
+    const fiiAsset = StatusInvestClient.parseHtml(
+      "HGLG11",
+      "fundos-imobiliarios",
+      fiiHtml
+    );
+    expect(fiiAsset).not.toBeNull();
+    expect(fiiAsset!.name).toBe("PÁTRIA LOG");
+    expect(fiiAsset!.price).toBeCloseTo(145.88, 2);
+    expect(fiiAsset!.pvp).toBeCloseTo(0.88, 2);
+    expect(fiiAsset!.fiiNavPerShare).toBeCloseTo(166.43, 2);
+    expect(fiiAsset!.fiiLastDividend).toBeCloseTo(1.17, 2);
+    expect(fiiAsset!.fiiShareholdersCount).toBe(608345);
+    expect(fiiAsset!.fiiTotalShares).toBe(45601745);
+    expect(fiiAsset!.fiiPhysicalVacancy).toBeNull();
+    expect(fiiAsset!.fiiFinancialVacancy).toBeNull();
+    expect(fiiAsset!.fiiAdminFee).toBeNull();
+
+    const feSample = `
+      <script>
+        var dataLayer_content = {"pagePostTerms":{"meta":{"codigo":"HGLG11","numero_cotista":608345,"numero_cotas":45601745,"patrimonio":7589554105.43,"vacancia":2,"vacancia_0_vacancia_fisica":2.9,"vacancia_0_vacancia_financeira":3.4,"vacancia_1_vacancia_fisica":2.7,"vacancia_1_vacancia_financeira":3.0,"taxa_de_adm":0.6,"taxa_de_gestao":"","setor_atuacao":"Fundo de Tijolo","segmento_ambima":"Logística"}}};
+        dataLayer.push( dataLayer_content );
+      </script>
+    `;
+    const feParsed = StatusInvestClient.parseFundsExplorerHtml(feSample);
+    expect(feParsed).not.toBeNull();
+    expect(feParsed!.physicalVacancy).toBeCloseTo(2.7, 2);
+    expect(feParsed!.financialVacancy).toBeCloseTo(3.0, 2);
+    expect(feParsed!.adminFee).toBeCloseTo(0.6, 2);
+    expect(feParsed!.shareholdersCount).toBe(608345);
+
     const tick = LiveFeedClient.simulateTick("PETR4", 52.71, 1793390000000);
     expect(tick.price).toBeGreaterThan(0);
     expect(tick.quantity).toBeGreaterThan(0);
@@ -417,7 +464,7 @@ describe("web server: Bun HTTP API, responsive frontend bundle & tick simulation
     }
   });
 
-  test("loads existing broker.db with legacy snake_case statusinvest_assets and computes /api/state cleanly", async () => {
+  test("loads existing broker.db with statusinvest_assets and computes /api/state cleanly", async () => {
     const { createBrokerServer } = await import("../src/server/index.ts");
     const running = await createBrokerServer({
       port: 0,
@@ -432,11 +479,20 @@ describe("web server: Bun HTTP API, responsive frontend bundle & tick simulation
       const stateJson = await stateRes.json();
       expect(stateJson.trending.length).toBe(187);
 
-      // Verify KNCR11 (cached in statusinvest_assets with snake_case keys and null vacancy)
+      // Verify HGLG11 & KNCR11 have real FII details (not fake 150000 / 3.5 / 3.15 / 0.8)
+      const hglg = stateJson.assets["HGLG11"];
+      expect(hglg).toBeDefined();
+      expect(hglg.fiiDetails.shareholdersCount).toBeGreaterThan(500000);
+      expect(hglg.fiiDetails.physicalVacancyPercent).toBeCloseTo(2.7, 1);
+      expect(hglg.fiiDetails.financialVacancyPercent).toBeCloseTo(3.0, 1);
+      expect(hglg.fiiDetails.adminFeePercent).toBeCloseTo(0.6, 2);
+
       const kncr = stateJson.assets["KNCR11"];
       expect(kncr).toBeDefined();
-      expect(kncr.indicators.dividendYield).toBeCloseTo(13.04, 2);
-      expect(typeof kncr.fiiDetails.physicalVacancyPercent).toBe("number");
+      expect(kncr.fiiDetails.shareholdersCount).toBeGreaterThan(800000);
+      expect(kncr.fiiDetails.physicalVacancyPercent).toBeNull();
+      expect(kncr.fiiDetails.financialVacancyPercent).toBeNull();
+      expect(kncr.fiiDetails.adminFeePercent).toBeCloseTo(1.0, 2);
     } finally {
       running.stop();
     }

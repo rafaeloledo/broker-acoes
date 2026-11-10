@@ -723,11 +723,18 @@ export const FichaView: React.FC<FichaViewProps> = ({
               <div className="card-inset">
                 <div className="kpi-label">Vacância Física / Financ.</div>
                 <strong>
-                  {fii.physicalVacancyPercent.toFixed(1)}% /{" "}
-                  {fii.financialVacancyPercent.toFixed(1)}%
+                  {fii.physicalVacancyPercent != null
+                    ? `${fii.physicalVacancyPercent.toFixed(1)}%`
+                    : "N/A"}{" "}
+                  /{" "}
+                  {fii.financialVacancyPercent != null
+                    ? `${fii.financialVacancyPercent.toFixed(1)}%`
+                    : "N/A"}
                 </strong>
                 <div className="kpi-sub">
-                  {fii.shareholdersCount.toLocaleString("pt-BR")} cotistas
+                  {fii.shareholdersCount != null && fii.shareholdersCount > 0
+                    ? `${fii.shareholdersCount.toLocaleString("pt-BR")} cotistas`
+                    : "Cotistas: N/D"}
                 </div>
               </div>
               <div className="card-inset">
@@ -736,7 +743,10 @@ export const FichaView: React.FC<FichaViewProps> = ({
                   R$ {fii.lastDividend.toFixed(2)} / cota
                 </strong>
                 <div className="kpi-sub">
-                  Taxa Adm: {fii.adminFeePercent.toFixed(2)}% a.a.
+                  Taxa Adm:{" "}
+                  {fii.adminFeePercent != null && fii.adminFeePercent > 0
+                    ? `${fii.adminFeePercent.toFixed(2)}% a.a.`
+                    : "Não informada"}
                 </div>
               </div>
             </div>
